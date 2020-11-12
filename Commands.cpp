@@ -112,6 +112,9 @@ Command * SmallShell::CreateCommand(const char* cmd_line) {
 }
 
 void SmallShell::executeCommand(const char *cmd_line) {
+    char** args;
+    _parseCommandLine(cmd_line,args);
+    cout << "ff";
   // TODO: Add your implementation here
   // for example:
   // Command* cmd = CreateCommand(cmd_line);
