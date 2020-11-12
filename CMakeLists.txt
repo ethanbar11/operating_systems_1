@@ -4,4 +4,4 @@ set(CMAKE_CXX_STANDARD 11)            # Enable c++14 standard
 
 
 # Add executable target with source files listed in SOURCE_FILES variable
-add_executable(operating_system_1 smash.cpp Commands.cpp signals.cpp)
+add_executable(operating_system_1 smash.cpp Commands.h Commands.cpp signals.h signals.cpp)

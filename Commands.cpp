@@ -94,9 +94,10 @@ SmallShell::~SmallShell() {
 */
 Command *SmallShell::CreateCommand(const char *cmd_line, char **args) {
     // TODO: If built in commands, remove &
-    if(strcmp(args[0], "chprompt") == 0)
-    {
-        return new ChangePromptCommand(this,args[1]);
+    if (strcmp(args[0], "chprompt") == 0) {
+        return new ChangePromptCommand(this, args[1]);
+    } else if (strcmp(args[0], "showpid") == 0) {
+        return new ShowPidCommand(cmd_line);
     }
     // For example:
 /*
@@ -116,9 +117,9 @@ Command *SmallShell::CreateCommand(const char *cmd_line, char **args) {
 void SmallShell::executeCommand(const char *cmd_line) {
     char *args[21];
     _parseCommandLine(cmd_line, args);
-    std::cout << "j";//args[0] << "\n" << args[1] << "\n" << args[2] << "\n";
-    Command * cmd=CreateCommand(cmd_line,args);
-     cmd->execute();
+//    std::cout << "j";//args[0] << "\n" << args[1] << "\n" << args[2] << "\n";
+    Command *cmd = CreateCommand(cmd_line, args);
+    cmd->execute();
     // Please note that you must fork smash process for some commands (e.g., external commands....)
 }
 
@@ -129,16 +130,28 @@ void ChangePromptCommand::execute() {
 }
 
 ChangePromptCommand::ChangePromptCommand(SmallShell *shell,
-                                         char *new_prompt_name) : BuiltInCommand(new_prompt_name) {
+                                         char *new_prompt_name)
+        : BuiltInCommand(new_prompt_name) {
 
     this->shell = shell;
     this->new_prompt_name = new_prompt_name;
 }
 
-BuiltInCommand::BuiltInCommand(const char *cmd_line) : Command::Command(cmd_line) {}
+BuiltInCommand::BuiltInCommand(const char *cmd_line) : Command::Command(
+        cmd_line) {}
 
 Command::Command(const char *cmd_line) {
 
 }
 
 Command::~Command() {}
+
+void ShowPidCommand::execute() {
+    std::cout << ::getpid() << "\n";
+
+}
+
+ShowPidCommand::ShowPidCommand(const char *cmd_line) : BuiltInCommand(
+        cmd_line) {
+
+}

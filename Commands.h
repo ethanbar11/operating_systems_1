@@ -226,7 +226,7 @@ public:
     {
         static SmallShell instance; // Guaranteed to be destroyed.
         // Instantiated on first use.
-        instance.shell_name = "smash";
+        instance.shell_name =  (char*)"smash";
         return instance;
     }
 
