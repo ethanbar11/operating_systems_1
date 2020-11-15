@@ -419,16 +419,20 @@ void pwdCommand::execute() {
 cdCommand::cdCommand(const char *cmd_line, JobsList *jobs) : BuiltInCommand(cmd_line) {
     char *args[21];
     _parseCommandLine(cmd_line, args);
+    this->exe = false;
     if (args[2]) {
         std::cout << "smash error: cd: too many arguments" << std::endl;
     } else if (strcmp(args[1], "-") == 0 && shell->last_dir.empty()) {
         std::cout << "smash error: cd: OLDPWD not set" << std::endl;
     } else {
         this->path = string(args[1]);
+        this->exe = true;
     }
 }
 
 void cdCommand::execute() {
+    if(!exe)
+        return;
     char cwd[PATH_MAX];
     if (getcwd(cwd, sizeof(cwd)) == NULL) {
         //todo: Handle error(?)

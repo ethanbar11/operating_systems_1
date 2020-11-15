@@ -311,6 +311,7 @@ public:
 class cdCommand : public BuiltInCommand {
 private:
     std::string path;
+    bool exe;
 public:
     cdCommand(const char *cmd_line, JobsList *jobs);
 
