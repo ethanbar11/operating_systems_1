@@ -2,6 +2,7 @@
 #define SMASH_COMMAND_H_
 
 #include <vector>
+#include <string.h>
 
 #define COMMAND_ARGS_MAX_LENGTH (200)
 #define COMMAND_MAX_ARGS (20)
@@ -236,6 +237,7 @@ public:
     ForegroundCommand(const char *cmd_line, JobsList *jobs);
 
     virtual ~ForegroundCommand() {}
+
     int GetJobID(char *const *args) const;
 
     void execute() override;
@@ -248,6 +250,7 @@ public:
     int jobID;
 
     BackgroundCommand(const char *cmd_line, JobsList *jobs);
+
     int GetJobID(char *const *args) const;
 
     virtual ~BackgroundCommand() {}
@@ -268,6 +271,7 @@ private:
 public:
     char *shell_name;
     JobsList jobsList;
+    std::string last_dir;
 
     Command *CreateCommand(const char *cmd_line);
 
@@ -291,6 +295,26 @@ public:
     lsCommand(const char *cmd_line, JobsList *jobs) : BuiltInCommand(cmd_line) {}
 
     virtual ~lsCommand() override {}
+
+    void execute() override;
+};
+
+class pwdCommand : public BuiltInCommand {
+public:
+    pwdCommand(const char *cmd_line, JobsList *jobs) : BuiltInCommand(cmd_line) {}
+
+    virtual ~pwdCommand() override {}
+
+    void execute() override;
+};
+
+class cdCommand : public BuiltInCommand {
+private:
+    std::string path;
+public:
+    cdCommand(const char *cmd_line, JobsList *jobs);
+
+    virtual ~cdCommand() override {}
 
     void execute() override;
 };
