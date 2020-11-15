@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <unistd.h>
 #include <string.h>
 #include <iostream>
@@ -6,6 +7,7 @@
 #include <sys/wait.h>
 #include <iomanip>
 #include "Commands.h"
+#include <signal.h>
 
 using namespace std;
 
@@ -79,26 +81,26 @@ void _removeBackgroundSign(char *cmd_line) {
     cmd_line[str.find_last_not_of(WHITESPACE, idx) + 1] = 0;
 }
 
-// TODO: Add your implementation for classes in Commands.h 
-
-SmallShell::SmallShell() {
-// TODO: add your implementation
-}
-
-SmallShell::~SmallShell() {
-// TODO: add your implementation
-}
-
 /**
 * Creates and returns a pointer to Command class which matches the given command line (cmd_line)
 */
-Command *SmallShell::CreateCommand(const char *cmd_line, char **args) {
-    // TODO: If built in commands, remove &
+Command *SmallShell::CreateCommand(const char *cmd_line) {
+    string cmd_s = string(cmd_line);
+    int pipe_position = cmd_s.find("|");
+    if (pipe_position != string::npos) {
+        return new PipeCommand(cmd_line);
+    }
+    char *args[21];
+    _parseCommandLine(cmd_line, args);
+    // Built in commands
     if (strcmp(args[0], "chprompt") == 0) {
-        return new ChangePromptCommand(this, args[1]);
+        return new ChangePromptCommand(cmd_line);
     } else if (strcmp(args[0], "showpid") == 0) {
         return new ShowPidCommand(cmd_line);
     }
+
+    // If didn't find any built in commands - treating it as external command
+    return new ExternalCommand(cmd_line);
     // For example:
 /*
   string cmd_s = string(cmd_line);
@@ -115,12 +117,14 @@ Command *SmallShell::CreateCommand(const char *cmd_line, char **args) {
 }
 
 void SmallShell::executeCommand(const char *cmd_line) {
-    char *args[21];
-    _parseCommandLine(cmd_line, args);
-//    std::cout << "j";//args[0] << "\n" << args[1] << "\n" << args[2] << "\n";
-    Command *cmd = CreateCommand(cmd_line, args);
+    this->jobsList.checkForFinishedJobs();
+    Command *cmd = CreateCommand(cmd_line);
     cmd->execute();
-    // Please note that you must fork smash process for some commands (e.g., external commands....)
+    cout << "Counter : " << this->jobsList.counter << "\n";
+}
+
+SmallShell::~SmallShell() {
+
 }
 
 
@@ -129,19 +133,24 @@ void ChangePromptCommand::execute() {
 
 }
 
-ChangePromptCommand::ChangePromptCommand(SmallShell *shell,
-                                         char *new_prompt_name)
-        : BuiltInCommand(new_prompt_name) {
-
-    this->shell = shell;
-    this->new_prompt_name = new_prompt_name;
+ChangePromptCommand::ChangePromptCommand(const char *cmdLine)
+        : BuiltInCommand(cmdLine) {
+    char *args[21];
+    _parseCommandLine(cmd_line, args);
+    this->new_prompt_name = args[1];
 }
 
+
 BuiltInCommand::BuiltInCommand(const char *cmd_line) : Command::Command(
-        cmd_line) {}
+        cmd_line) {
+    string line = std::string(cmd_line);
+    std::replace(line.begin(), line.end(), '&', ' ');
+    this->cmd_line = line.c_str();
+}
 
 Command::Command(const char *cmd_line) {
-
+    this->original_cmd_line = cmd_line;
+    this->shell = &SmallShell::getInstance();
 }
 
 Command::~Command() {}
@@ -154,4 +163,211 @@ void ShowPidCommand::execute() {
 ShowPidCommand::ShowPidCommand(const char *cmd_line) : BuiltInCommand(
         cmd_line) {
 
+}
+
+
+JobsList::JobsList() {
+    this->counter = 0;
+}
+
+void JobsList::addJob(Command *cmd, int processID, bool isStopped) {
+    // Add usage to stopped.
+    counter++;
+    this->jobs.push_back(
+            new JobEntry(cmd, this->counter, processID, Background));
+}
+
+void JobsList::checkForFinishedJobs() {
+    int pid = 1;
+    while (pid != 0 and pid != -1) {
+        int status;
+        pid = waitpid(-1, &status, WNOHANG);
+        if (pid != 0 and pid != -1) {
+            this->removeJobById(pid);
+        }
+    }
+    this->setCurrentCounter();
+
+
+}
+
+void JobsList::setCurrentCounter() {
+    int maxCounter = 0;
+    for (int i = 0; i < this->jobs.size(); i++) {
+        if (jobs[i]->ID > maxCounter)
+            maxCounter = jobs[i]->ID;
+    }
+    this->counter = maxCounter;
+}
+
+void JobsList::removeJobById(int jobId) {
+    JobEntry *job = getJobByProcessId(jobId);
+    if (job == nullptr)
+        // TODO: add handling for error here?
+        ;
+    jobs.erase(std::remove(jobs.begin(), jobs.end(), job), jobs.end());
+
+}
+
+JobsList::JobEntry *JobsList::getJobById(int jobId) {
+    return nullptr;
+}
+
+JobsList::JobEntry *JobsList::getJobByProcessId(int processID) {
+    for (auto &job : this->jobs)
+        if (job->processID == processID)
+            return job;
+    return nullptr;
+}
+
+// Returns -1 in pointer and nullptr for job entry if didn't
+// find any job.
+JobsList::JobEntry *JobsList::getLastJob(int *lastJobId) {
+    for (auto job  : jobs) {
+        if (job->ID == this->counter) {
+            *lastJobId = job->ID;
+            return job;
+        }
+    }
+    *lastJobId = -1;
+    return nullptr;
+}
+
+JobsList::JobEntry *JobsList::getLastStoppedJob(int *jobId) {
+    for (auto job  : jobs) {
+        if (job->ID == this->counter && job->status == Stopped) {
+            *jobId = job->ID;
+            return job;
+        }
+    }
+    *jobId = -1;
+    return nullptr;
+}
+
+PipeCommand::PipeCommand(const char *cmd_line) : Command(cmd_line) {
+
+    string cmd_s = string(cmd_line);
+    int pipe_position = cmd_s.find("|");
+//    string first_command =
+    int second_part_length = cmd_s.length() - pipe_position;
+    Command *first_command = this->shell->CreateCommand(
+            cmd_s.substr(0, pipe_position - 1).c_str());
+    Command *second_command = this->shell->CreateCommand(
+            cmd_s.substr(pipe_position + 1,
+                         second_part_length).c_str());
+
+}
+
+void PipeCommand::execute() {
+
+}
+
+ExternalCommand::ExternalCommand(const char *cmd_line) : Command(cmd_line) {
+//     TODO: To check here for background.
+    string line = _trim(cmd_line);
+    if (line.back() == '&')
+        this->status = Background;
+    std::replace(line.begin(), line.end(), '&', ' ');
+    this->cmd_line = line.c_str();
+}
+
+void ExternalCommand::execute() {
+    pid_t pid = fork();
+    if (pid == -1) {
+        //TODO: Change problem handling
+        cout << "Problem Forking, why?!!!";
+    } else if (pid == 0) { // Son
+        setpgrp();
+        ::execl("/bin/bash", "bash", "-c",
+                this->cmd_line, NULL);// this->args_without_start);
+    } else { //Father
+        if (this->status == Foreground) {
+            waitpid(pid, NULL, WUNTRACED);
+        } else {
+            this->shell->jobsList.checkForFinishedJobs();
+            this->shell->jobsList.addJob(this, pid, false);
+        }
+    }
+
+}
+
+ForegroundCommand::ForegroundCommand(const char *cmd_line, JobsList *jobs)
+        : BuiltInCommand(cmd_line) {
+    char *args[21];
+    for (auto &arg : args) {
+        arg = nullptr;
+    }
+    _parseCommandLine(this->cmd_line, args);
+    if (args[2] != nullptr) {//Error in number of arguments
+        cout << "smash error: kill: invalid arguments" << "\n";
+        this->should_operate = false;
+        return;
+    }
+    jobID = GetJobID(args);
+    if (jobID == -1) { // Error in job id
+        if (shell->jobsList.jobs.empty())
+            cout << "smash error: fg: jobs list is empty" << "\n";
+        else
+            cout << "smash error: kill: job-id" << args[1] << " does not exist"
+                 << "\n";
+
+        this->should_operate = false;
+        return;
+    }
+    auto job = shell->jobsList.getJobById(jobID);
+    cout << this->original_cmd_line << " : " << job->processID << "\n";
+    this->should_operate = true;
+}
+
+int ForegroundCommand::GetJobID(char *const *args) const {
+    int jobID = -1;
+    if (args[1] != nullptr) {
+        jobID = atoi(args[1]);
+    } else {
+        shell->jobsList.getLastJob(&jobID);
+    }
+    return jobID;
+}
+
+void ForegroundCommand::execute() {
+    auto job = shell->jobsList.getJobById(jobID);
+    kill(job->processID, SIGCONT);
+    job->command = nullptr;
+    shell->jobsList.removeJobById(jobID);
+    waitpid(job->processID, nullptr, WUNTRACED);
+}
+
+BackgroundCommand::BackgroundCommand(const char *cmd_line, JobsList *jobs)
+        : ExternalCommand(cmd_line) {
+    char *args[21];
+    for (auto &arg : args) {
+        arg = nullptr;
+    }
+    _parseCommandLine(this->cmd_line, args);
+    if (args[2] != nullptr) {//Error in number of arguments
+        cout << "smash error: kill: invalid arguments" << "\n";
+        this->should_operate = false;
+        return;
+    }
+    jobID = GetJobID(args);
+    if (jobID == -1) { // Error in job id
+        if (shell->jobsList.jobs.empty())
+            cout << "smash error: fg: jobs list is empty" << "\n";
+        else
+            cout << "smash error: kill: job-id" << args[1] << " does not exist"
+                 << "\n";
+
+        this->should_operate = false;
+        return;
+    }
+    cout << this->original_cmd_line << "\n";
+    this->should_operate = true;
+
+}
+
+void BackgroundCommand::execute() {
+    auto job = shell->jobsList.getJobById(jobID);
+    kill(job->processID, SIGCONT);
+    job->command = nullptr;
+    shell->jobsList.removeJobById(jobID);
 }

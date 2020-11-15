@@ -9,14 +9,26 @@
 
 class SmallShell;
 
+enum JobStatus {
+    Foreground, Background, Stopped
+};
+
 class Command {
+private:
 // TODO: Add your data members
 public:
+    SmallShell *shell;
+    const char *cmd_line;
+    const char *original_cmd_line;
+    bool should_operate;
+
     Command(const char *cmd_line);
 
     virtual ~Command();
 
     virtual void execute() = 0;
+
+
     //virtual void prepare();
     //virtual void cleanup();
     // TODO: Add your extra methods if needed
@@ -26,11 +38,15 @@ class BuiltInCommand : public Command {
 public:
     BuiltInCommand(const char *cmd_line);
 
-    virtual ~BuiltInCommand(){}
+    virtual ~BuiltInCommand() {}
 };
 
 class ExternalCommand : public Command {
 public:
+    char *path;
+    char *args_without_start[2];
+    JobStatus status;
+
     ExternalCommand(const char *cmd_line);
 
     virtual ~ExternalCommand() {}
@@ -127,11 +143,10 @@ public:
 class ChangePromptCommand : public BuiltInCommand {
 
 private:
-    SmallShell* shell;
-    char* new_prompt_name;
+    char *new_prompt_name;
     // TODO: Add your data members
 public:
-    ChangePromptCommand(SmallShell *shell, char *new_prompt_name);
+    ChangePromptCommand(const char *cmdLine);
 
     virtual ~ChangePromptCommand() {}
 
@@ -140,19 +155,40 @@ public:
 };
 
 class JobsList {
+private:
+
 public:
     class JobEntry {
-        // TODO: Add your data members
+    public:
+        Command *command;
+        std::time_t start_time;
+        int ID;
+        int processID;
+        JobStatus status;
+
+        JobEntry(Command *cmd, int id, int processID, JobStatus status) {
+            this->command = cmd;
+            this->ID = id;
+            this->processID = processID;
+            this->status = status;
+            start_time = std::time(nullptr);
+            // TODO: Add start time.
+        }
     };
+
+    std::vector<JobEntry *> jobs;
+    int counter;
     // TODO: Add your data members
-public:
+
     JobsList();
 
-    ~JobsList();
+    ~JobsList() {}
 
-    void addJob(Command *cmd, bool isStopped = false);
+    void addJob(Command *cmd, int processID, bool isStopped = false);
 
     void printJobsList();
+
+    void checkForFinishedJobs();
 
     void killAllJobs();
 
@@ -160,7 +196,11 @@ public:
 
     JobEntry *getJobById(int jobId);
 
+    JobEntry *getJobByProcessId(int processID);
+
     void removeJobById(int jobId);
+
+    void setCurrentCounter();
 
     JobEntry *getLastJob(int *lastJobId);
 
@@ -191,17 +231,24 @@ public:
 class ForegroundCommand : public BuiltInCommand {
     // TODO: Add your data members
 public:
+    int jobID;
+
     ForegroundCommand(const char *cmd_line, JobsList *jobs);
 
     virtual ~ForegroundCommand() {}
+    int GetJobID(char *const *args) const;
 
     void execute() override;
+
 };
 
 class BackgroundCommand : public BuiltInCommand {
     // TODO: Add your data members
 public:
+    int jobID;
+
     BackgroundCommand(const char *cmd_line, JobsList *jobs);
+    int GetJobID(char *const *args) const;
 
     virtual ~BackgroundCommand() {}
 
@@ -214,11 +261,15 @@ public:
 class SmallShell {
 private:
 
-    SmallShell();
+    SmallShell() {
+        this->shell_name = (char *) "smash";
+    }
 
 public:
     char *shell_name;
-    Command *CreateCommand(const char *cmd_line, char **args);
+    JobsList jobsList;
+
+    Command *CreateCommand(const char *cmd_line);
 
     SmallShell(SmallShell const &) = delete; // disable copy ctor
     void operator=(SmallShell const &) = delete; // disable = operator
@@ -226,7 +277,6 @@ public:
     {
         static SmallShell instance; // Guaranteed to be destroyed.
         // Instantiated on first use.
-        instance.shell_name =  (char*)"smash";
         return instance;
     }
 
