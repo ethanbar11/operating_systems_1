@@ -286,4 +286,13 @@ public:
     // TODO: add extra methods as needed
 };
 
+class lsCommand : public BuiltInCommand {
+public:
+    lsCommand(const char *cmd_line, JobsList *jobs) : BuiltInCommand(cmd_line) {}
+
+    virtual ~lsCommand() override {}
+
+    void execute() override;
+};
+
 #endif //SMASH_COMMAND_H_

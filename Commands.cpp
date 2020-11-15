@@ -8,6 +8,7 @@
 #include <iomanip>
 #include "Commands.h"
 #include <signal.h>
+#include <dirent.h>
 
 using namespace std;
 
@@ -95,6 +96,8 @@ Command *SmallShell::CreateCommand(const char *cmd_line) {
     // Built in commands
     if (strcmp(args[0], "chprompt") == 0) {
         return new ChangePromptCommand(cmd_line);
+    } else if (strcmp(args[0], "ls") == 0) {
+        return new lsCommand(cmd_line, NULL);
     } else if (strcmp(args[0], "showpid") == 0) {
         return new ShowPidCommand(cmd_line);
     }
@@ -137,7 +140,11 @@ ChangePromptCommand::ChangePromptCommand(const char *cmdLine)
         : BuiltInCommand(cmdLine) {
     char *args[21];
     _parseCommandLine(cmd_line, args);
-    this->new_prompt_name = args[1];
+    char *new_name = "smash";
+    if (args[1]) {
+        new_name = args[1];
+    }
+    this->new_prompt_name = new_name;
 }
 
 
@@ -338,6 +345,7 @@ int BackgroundCommand::GetJobID(char *const *args) const {
     }
     return jobIdLocal;
 }
+
 void ForegroundCommand::execute() {
     auto job = shell->jobsList.getJobById(jobID);
     kill(job->processID, SIGCONT);
@@ -379,4 +387,41 @@ void BackgroundCommand::execute() {
     kill(job->processID, SIGCONT);
     job->command = nullptr;
     shell->jobsList.removeJobById(jobID);
+}
+
+int getdir(string dir, vector<string> &files) {
+    DIR *dp;
+    struct dirent *dirp;
+    if ((dp = opendir(dir.c_str())) == NULL) {
+        cout << "Error(" << errno << ") opening " << dir << endl;
+        return errno;
+    }
+
+    while ((dirp = readdir(dp)) != NULL) {
+        files.push_back(string(dirp->d_name));
+    }
+    closedir(dp);
+    return 0;
+}
+
+bool alphabet_compare(std::string a, std::string b) {
+    char ta[strlen(a.c_str())], tb[strlen(b.c_str())];
+    strcpy(ta, a.c_str());
+    strcpy(tb, b.c_str());
+    string tsa(ta), tsb(tb);
+    std::transform(tsa.begin(), tsa.end(), tsa.begin(), [](unsigned char c){return std::tolower(c);});
+    std::transform(tsb.begin(), tsb.end(), tsb.begin(), [](unsigned char c){return std::tolower(c);});
+    return tsa < tsb;
+};
+
+void lsCommand::execute() {
+    string dir = string(".");
+    vector<string> files = vector<string>();
+    getdir(dir, files);
+    std::sort(files.begin(), files.end(), alphabet_compare);
+
+
+    for (unsigned int i = 0; i < files.size(); i++) {
+        std::cout << files[i] << std::endl;
+    }
 }
