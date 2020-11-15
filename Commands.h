@@ -161,7 +161,7 @@ public:
     class JobEntry {
     public:
         Command *command;
-        std::time_t start_time;
+        time_t start_time;
         int ID;
         int processID;
         JobStatus status;
@@ -171,7 +171,7 @@ public:
             this->ID = id;
             this->processID = processID;
             this->status = status;
-            start_time = std::time(nullptr);
+            start_time = time(nullptr);
             // TODO: Add start time.
         }
     };

@@ -329,6 +329,15 @@ int ForegroundCommand::GetJobID(char *const *args) const {
     return jobID;
 }
 
+int BackgroundCommand::GetJobID(char *const *args) const {
+    int jobIdLocal = -1;
+    if (args[1] != nullptr) {
+        jobIdLocal = atoi(args[1]);
+    } else {
+        shell->jobsList.getLastJob(&jobIdLocal);
+    }
+    return jobIdLocal;
+}
 void ForegroundCommand::execute() {
     auto job = shell->jobsList.getJobById(jobID);
     kill(job->processID, SIGCONT);
@@ -338,7 +347,7 @@ void ForegroundCommand::execute() {
 }
 
 BackgroundCommand::BackgroundCommand(const char *cmd_line, JobsList *jobs)
-        : ExternalCommand(cmd_line) {
+        : BuiltInCommand(cmd_line) {
     char *args[21];
     for (auto &arg : args) {
         arg = nullptr;
