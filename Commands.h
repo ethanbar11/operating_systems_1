@@ -19,11 +19,16 @@ private:
 // TODO: Add your data members
 public:
     SmallShell *shell;
-    const char *cmd_line;
-    const char *original_cmd_line;
+
+    char *cmd_line;
+    char *original_cmd_line;
     bool should_operate;
 
     Command(const char *cmd_line);
+
+    int getMaxJobID(char *const *args) const;
+
+    int GetMaxStoppedJobID(char *const *args) const;
 
     virtual ~Command();
 
@@ -155,29 +160,31 @@ public:
 
 };
 
+class JobEntry {
+public:
+    Command *command;
+    time_t start_time;
+    int ID;
+    int pid;
+    JobStatus status;
+
+    JobEntry(Command *cmd, int id, int processID, JobStatus status) {
+        this->command = cmd;
+        this->ID = id;
+        this->pid = processID;
+        this->status = status;
+        start_time = time(nullptr);
+        // TODO: Add start time.
+    }
+};
+
 class JobsList {
 private:
 
 public:
-    class JobEntry {
-    public:
-        Command *command;
-        time_t start_time;
-        int ID;
-        int processID;
-        JobStatus status;
-
-        JobEntry(Command *cmd, int id, int processID, JobStatus status) {
-            this->command = cmd;
-            this->ID = id;
-            this->processID = processID;
-            this->status = status;
-            start_time = time(nullptr);
-            // TODO: Add start time.
-        }
-    };
 
     std::vector<JobEntry *> jobs;
+    JobEntry *currentJob;
     int counter;
     // TODO: Add your data members
 
@@ -186,6 +193,10 @@ public:
     ~JobsList() {}
 
     void addJob(Command *cmd, int processID, bool isStopped = false);
+
+    void setCurrentJob(Command *cmd, int processID, bool isStopped = false) {
+        this->currentJob = new JobEntry(cmd, -1, processID, Foreground);
+    }
 
     void printJobsList();
 
@@ -212,7 +223,7 @@ public:
 class JobsCommand : public BuiltInCommand {
     // TODO: Add your data members
 public:
-    JobsCommand(const char *cmd_line, JobsList *jobs);
+    JobsCommand(const char *cmd_line);
 
     virtual ~JobsCommand() {}
 
@@ -222,11 +233,14 @@ public:
 class KillCommand : public BuiltInCommand {
     // TODO: Add your data members
 public:
-    KillCommand(const char *cmd_line, JobsList *jobs);
+    KillCommand(const char *cmd_line);
 
     virtual ~KillCommand() {}
 
     void execute() override;
+
+    int jobPID;
+    int signum;
 };
 
 class ForegroundCommand : public BuiltInCommand {
@@ -234,11 +248,9 @@ class ForegroundCommand : public BuiltInCommand {
 public:
     int jobID;
 
-    ForegroundCommand(const char *cmd_line, JobsList *jobs);
+    ForegroundCommand(const char *cmd_line);
 
     virtual ~ForegroundCommand() {}
-
-    int GetJobID(char *const *args) const;
 
     void execute() override;
 
@@ -249,9 +261,8 @@ class BackgroundCommand : public BuiltInCommand {
 public:
     int jobID;
 
-    BackgroundCommand(const char *cmd_line, JobsList *jobs);
+    BackgroundCommand(const char *cmd_line);
 
-    int GetJobID(char *const *args) const;
 
     virtual ~BackgroundCommand() {}
 

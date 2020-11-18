@@ -102,11 +102,20 @@ Command *SmallShell::CreateCommand(const char *cmd_line) {
         return new lsCommand(cmd_line, NULL);
     } else if (strcmp(args[0], "showpid") == 0) {
         return new ShowPidCommand(cmd_line);
+    } else if (strcmp(args[0], "fg") == 0) {
+        return new ForegroundCommand(cmd_line);
+    } else if (strcmp(args[0], "bg") == 0) {
+        return new BackgroundCommand(cmd_line);
+    } else if (strcmp(args[0], "kill") == 0) {
+        return new KillCommand(cmd_line);
+    } else if (strcmp(args[0], "jobs") == 0) {
+        return new JobsCommand(cmd_line);
     } else if (strcmp(args[0], "pwd") == 0) {
         return new pwdCommand(cmd_line, NULL);
     } else if (strcmp(args[0], "cd") == 0) {
         return new cdCommand(cmd_line, NULL);
     }
+
 
     // If didn't find any built in commands - treating it as external command
     return new ExternalCommand(cmd_line);
@@ -129,7 +138,7 @@ void SmallShell::executeCommand(const char *cmd_line) {
     this->jobsList.checkForFinishedJobs();
     Command *cmd = CreateCommand(cmd_line);
     cmd->execute();
-    cout << "Counter : " << this->jobsList.counter << "\n";
+//    cout << "Counter : " << this->jobsList.counter << "\n";
 }
 
 SmallShell::~SmallShell() {
@@ -158,11 +167,14 @@ BuiltInCommand::BuiltInCommand(const char *cmd_line) : Command::Command(
         cmd_line) {
     string line = std::string(cmd_line);
     std::replace(line.begin(), line.end(), '&', ' ');
-    this->cmd_line = line.c_str();
+    this->cmd_line = (char *) line.c_str();
 }
 
 Command::Command(const char *cmd_line) {
-    this->original_cmd_line = cmd_line;
+//    this->original_cmd_line = string(cmd_line).c_str();
+    this->original_cmd_line = (char *) malloc(strlen(cmd_line) + 1);
+    strcpy(original_cmd_line, cmd_line);
+    // TODO: Need to clean memory of the string
     this->shell = &SmallShell::getInstance();
 }
 
@@ -181,13 +193,19 @@ ShowPidCommand::ShowPidCommand(const char *cmd_line) : BuiltInCommand(
 
 JobsList::JobsList() {
     this->counter = 0;
+    currentJob = nullptr;
 }
 
 void JobsList::addJob(Command *cmd, int processID, bool isStopped) {
+    checkForFinishedJobs();
     // Add usage to stopped.
     counter++;
-    this->jobs.push_back(
-            new JobEntry(cmd, this->counter, processID, Background));
+    if (isStopped)
+        this->jobs.push_back(
+                new JobEntry(cmd, this->counter, processID, Stopped));
+    else
+        this->jobs.push_back(
+                new JobEntry(cmd, this->counter, processID, Background));
 }
 
 void JobsList::checkForFinishedJobs() {
@@ -214,28 +232,32 @@ void JobsList::setCurrentCounter() {
 }
 
 void JobsList::removeJobById(int jobId) {
-    JobEntry *job = getJobByProcessId(jobId);
+    JobEntry *job = getJobById(jobId);
     if (job == nullptr)
         // TODO: add handling for error here?
         ;
     jobs.erase(std::remove(jobs.begin(), jobs.end(), job), jobs.end());
+    setCurrentCounter();
 
 }
 
-JobsList::JobEntry *JobsList::getJobById(int jobId) {
+JobEntry *JobsList::getJobById(int jobId) {
+    for (auto &job : this->jobs)
+        if (job->ID == jobId)
+            return job;
     return nullptr;
 }
 
-JobsList::JobEntry *JobsList::getJobByProcessId(int processID) {
+JobEntry *JobsList::getJobByProcessId(int processID) {
     for (auto &job : this->jobs)
-        if (job->processID == processID)
+        if (job->pid == processID)
             return job;
     return nullptr;
 }
 
 // Returns -1 in pointer and nullptr for job entry if didn't
 // find any job.
-JobsList::JobEntry *JobsList::getLastJob(int *lastJobId) {
+JobEntry *JobsList::getLastJob(int *lastJobId) {
     for (auto job  : jobs) {
         if (job->ID == this->counter) {
             *lastJobId = job->ID;
@@ -246,7 +268,7 @@ JobsList::JobEntry *JobsList::getLastJob(int *lastJobId) {
     return nullptr;
 }
 
-JobsList::JobEntry *JobsList::getLastStoppedJob(int *jobId) {
+JobEntry *JobsList::getLastStoppedJob(int *jobId) {
     for (auto job  : jobs) {
         if (job->ID == this->counter && job->status == Stopped) {
             *jobId = job->ID;
@@ -277,11 +299,12 @@ void PipeCommand::execute() {
 
 ExternalCommand::ExternalCommand(const char *cmd_line) : Command(cmd_line) {
 //     TODO: To check here for background.
-    string line = _trim(cmd_line);
+    string line = _trim(this->original_cmd_line);
     if (line.back() == '&')
         this->status = Background;
     std::replace(line.begin(), line.end(), '&', ' ');
-    this->cmd_line = line.c_str();
+    this->cmd_line = (char *) malloc(line.size() + 1);
+    strcpy(this->cmd_line, line.c_str());
 }
 
 void ExternalCommand::execute() {
@@ -295,7 +318,10 @@ void ExternalCommand::execute() {
                 this->cmd_line, NULL);// this->args_without_start);
     } else { //Father
         if (this->status == Foreground) {
+            this->shell->jobsList.setCurrentJob(this, pid, false);
             waitpid(pid, NULL, WUNTRACED);
+            delete this->shell->jobsList.currentJob;
+            this->shell->jobsList.currentJob = nullptr;
         } else {
             this->shell->jobsList.checkForFinishedJobs();
             this->shell->jobsList.addJob(this, pid, false);
@@ -304,63 +330,34 @@ void ExternalCommand::execute() {
 
 }
 
-ForegroundCommand::ForegroundCommand(const char *cmd_line, JobsList *jobs)
-        : BuiltInCommand(cmd_line) {
-    char *args[21];
-    for (auto &arg : args) {
-        arg = nullptr;
-    }
-    _parseCommandLine(this->cmd_line, args);
-    if (args[2] != nullptr) {//Error in number of arguments
-        cout << "smash error: kill: invalid arguments" << "\n";
-        this->should_operate = false;
-        return;
-    }
-    jobID = GetJobID(args);
-    if (jobID == -1) { // Error in job id
-        if (shell->jobsList.jobs.empty())
-            cout << "smash error: fg: jobs list is empty" << "\n";
-        else
-            cout << "smash error: kill: job-id" << args[1] << " does not exist"
-                 << "\n";
 
-        this->should_operate = false;
-        return;
-    }
-    auto job = shell->jobsList.getJobById(jobID);
-    cout << this->original_cmd_line << " : " << job->processID << "\n";
-    this->should_operate = true;
-}
-
-int ForegroundCommand::GetJobID(char *const *args) const {
+int Command::getMaxJobID(char *const *args) const {
     int jobID = -1;
     if (args[1] != nullptr) {
         jobID = atoi(args[1]);
+        if (this->shell->jobsList.getJobById(jobID) == nullptr)
+            return -1;
+
     } else {
         shell->jobsList.getLastJob(&jobID);
     }
     return jobID;
 }
 
-int BackgroundCommand::GetJobID(char *const *args) const {
+int Command::GetMaxStoppedJobID(char *const *args) const {
     int jobIdLocal = -1;
     if (args[1] != nullptr) {
         jobIdLocal = atoi(args[1]);
+        if (this->shell->jobsList.getJobById(jobIdLocal) == nullptr)
+            return -1;
+
     } else {
         shell->jobsList.getLastJob(&jobIdLocal);
     }
     return jobIdLocal;
 }
 
-void ForegroundCommand::execute() {
-    auto job = shell->jobsList.getJobById(jobID);
-    kill(job->processID, SIGCONT);
-    job->command = nullptr;
-    shell->jobsList.removeJobById(jobID);
-    waitpid(job->processID, nullptr, WUNTRACED);
-}
-
-BackgroundCommand::BackgroundCommand(const char *cmd_line, JobsList *jobs)
+ForegroundCommand::ForegroundCommand(const char *cmd_line)
         : BuiltInCommand(cmd_line) {
     char *args[21];
     for (auto &arg : args) {
@@ -368,31 +365,136 @@ BackgroundCommand::BackgroundCommand(const char *cmd_line, JobsList *jobs)
     }
     _parseCommandLine(this->cmd_line, args);
     if (args[2] != nullptr) {//Error in number of arguments
-        cout << "smash error: kill: invalid arguments" << "\n";
+        cout << "smash error: fg: invalid arguments" << "\n";
         this->should_operate = false;
         return;
     }
-    jobID = GetJobID(args);
+    jobID = getMaxJobID(args);
     if (jobID == -1) { // Error in job id
         if (shell->jobsList.jobs.empty())
             cout << "smash error: fg: jobs list is empty" << "\n";
         else
-            cout << "smash error: kill: job-id" << args[1] << " does not exist"
+            cout << "smash error: fg: job-id " << args[1] << " does not exist"
                  << "\n";
+        this->should_operate = false;
+        return;
+    }
+
+    this->should_operate = true;
+
+}
+
+void ForegroundCommand::execute() {
+    if (!should_operate)
+        return;
+    auto job = shell->jobsList.getJobById(jobID);
+    cout << job->command->original_cmd_line << " : " << job->pid << "\n";
+    kill(job->pid, SIGCONT);
+    auto command_to_use = job->command;
+    job->command = nullptr;
+    shell->jobsList.removeJobById(jobID);
+    this->shell->jobsList.setCurrentJob(command_to_use, job->pid, false);
+    int p_status;
+    waitpid(job->pid, &p_status, WUNTRACED);
+    if (!WIFSTOPPED(p_status)) {
+        delete this->shell->jobsList.currentJob;
+        this->shell->jobsList.currentJob = nullptr;
+
+    }
+}
+
+BackgroundCommand::BackgroundCommand(const char *cmd_line)
+        : BuiltInCommand(cmd_line) {
+    char *args[21];
+    for (auto &arg : args) {
+        arg = nullptr;
+    }
+    _parseCommandLine(this->cmd_line, args);
+    if (args[2] != nullptr) {//Error in number of arguments
+        cout << "smash error: bg: invalid arguments" << "\n";
+        this->should_operate = false;
+        return;
+    }
+    jobID = GetMaxStoppedJobID(args);
+    if (jobID == -1) { // Error in job id
+        auto job = shell->jobsList.getJobById(atoi(args[1]));
+        if (job == nullptr)
+            cout << "smash error: bg: job-id " << args[1] << " does not exist"
+                 << "\n";
+        else //TODO: might be a problem here if no job was told to be bg'd.
+            cout << "smash error: bg: job-id " << args[1]
+                 << " is already running in the background" << "\n";
 
         this->should_operate = false;
         return;
     }
-    cout << this->original_cmd_line << "\n";
     this->should_operate = true;
 
 }
 
 void BackgroundCommand::execute() {
+    if (!should_operate)
+        return;
     auto job = shell->jobsList.getJobById(jobID);
-    kill(job->processID, SIGCONT);
-    job->command = nullptr;
-    shell->jobsList.removeJobById(jobID);
+    cout << job->command->original_cmd_line << " : " << job->pid << "\n";
+    kill(job->pid, SIGCONT);
+    job->status = Background;
+}
+
+KillCommand::KillCommand(const char *cmd_line) : BuiltInCommand(cmd_line) {
+    char *args[21];
+    for (auto &arg : args) {
+        arg = nullptr;
+    }
+    _parseCommandLine(this->cmd_line, args);
+    auto signum_str = string(args[1]);
+    signum = atoi(signum_str.substr(1, signum_str.size() - 1).c_str());
+    if (args[1] == nullptr ||
+        args[2] == nullptr) {//Error in number of arguments
+        cout << "smash error: kill: invalid arguments" << "\n";
+        this->should_operate = false;
+        return;
+    }
+    auto job = shell->jobsList.getJobById(atoi(args[2]));
+    if (job == nullptr) {
+        cout << "smash error: kill: job-id " << args[2] << " does not exist"
+             << "\n";
+        this->should_operate = false;
+        return;
+    }
+    this->jobPID = job->pid;
+    this->should_operate = true;
+
+}
+
+void KillCommand::execute() {
+    kill(this->jobPID, signum);
+    cout << "signal number " << signum << "was sent to pid " << jobPID << "\n";
+}
+
+bool jobscompareJobEntrys(JobEntry *first, JobEntry *second) {
+    return (first->ID < second->ID);
+}
+
+void JobsCommand::execute() {
+    auto jobs_v = this->shell->jobsList.jobs;
+    sort(jobs_v.begin(), jobs_v.end(), jobscompareJobEntrys);
+    for (auto &job : jobs_v) {
+        string status_string = "";
+        if (job->status == Stopped)
+            status_string = " (stopped)";
+        cout << job->ID << " " << job->command->original_cmd_line << " : "
+             << job->pid
+             << " " << difftime(time(nullptr), job->start_time) << " secs"
+             << status_string
+             << "\n";
+    }
+
+}
+
+JobsCommand::JobsCommand(const char *cmd_line) : BuiltInCommand(cmd_line) {
+    this->shell->jobsList.checkForFinishedJobs();
+
 }
 
 void lsCommand::execute() {
