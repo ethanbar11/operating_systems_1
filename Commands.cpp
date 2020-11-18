@@ -499,7 +499,7 @@ JobsCommand::JobsCommand(const char *cmd_line) : BuiltInCommand(cmd_line) {
 
 void lsCommand::execute() {
     struct dirent **namelist;
-    vector<string> files = vector<string>();
+    vector <string> files = vector<string>();
     int n;
     int i = 0;
     n = scandir(".", &namelist, NULL, alphasort);
@@ -533,7 +533,7 @@ cdCommand::cdCommand(const char *cmd_line, JobsList *jobs) : BuiltInCommand(cmd_
 }
 
 void cdCommand::execute() {
-    if(!exe)
+    if (!exe)
         return;
     char cwd[PATH_MAX];
     if (getcwd(cwd, sizeof(cwd)) == NULL) {
