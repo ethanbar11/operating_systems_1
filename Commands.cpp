@@ -11,6 +11,7 @@
 #include <dirent.h>
 #include<stdio.h>
 #include<sys/dir.h>
+#include <fcntl.h>
 
 using namespace std;
 
@@ -26,6 +27,7 @@ const std::string WHITESPACE = " \n\r\t\f\v";
 #define FUNC_ENTRY()
 #define FUNC_EXIT()
 #endif
+#define MAX_BUFF 1024
 
 #define DEBUG_PRINT cerr << "DEBUG: "
 
@@ -96,6 +98,9 @@ Command *SmallShell::CreateCommand(const char *cmd_line) {
     char *args[21];
     _parseCommandLine(cmd_line, args);
     // Built in commands
+    if (cmd_s.find('>')) {
+        return new RedirectionCommand(cmd_line);
+    }
     if (strcmp(args[0], "chprompt") == 0) {
         return new ChangePromptCommand(cmd_line);
     } else if (strcmp(args[0], "ls") == 0) {
@@ -119,7 +124,6 @@ Command *SmallShell::CreateCommand(const char *cmd_line) {
     } else if (strcmp(args[0], "quit") == 0) {
         return new QuitCommand(cmd_line);
     }
-
 
     // If didn't find any built in commands - treating it as external command
     return new ExternalCommand(cmd_line);
@@ -175,6 +179,7 @@ BuiltInCommand::BuiltInCommand(const char *cmd_line) : Command::Command(
 }
 
 Command::Command(const char *cmd_line) {
+//    this->original_cmd_line = string(cmd_line).c_str();
     this->original_cmd_line = (char *) malloc(strlen(cmd_line) + 1);
     strcpy(original_cmd_line, cmd_line);
     // TODO: Need to clean memory of the string
@@ -294,15 +299,99 @@ PipeCommand::PipeCommand(const char *cmd_line) : Command(cmd_line) {
 //    string first_command =
     int second_part_length = cmd_s.length() - pipe_position;
     Command *first_command = this->shell->CreateCommand(
-            cmd_s.substr(0, pipe_position - 1).c_str());
+            cmd_s.substr(0, pipe_position).c_str());
     Command *second_command = this->shell->CreateCommand(
             cmd_s.substr(pipe_position + 1,
                          second_part_length).c_str());
-
+    c1 = first_command;
+    c2 = second_command;
+    this->isBackGround = dynamic_cast<BuiltInCommand *>(this->c1) == nullptr &&
+                         cmd_s.find('&') != std::string::npos &&
+                         cmd_s.find('&') > pipe_position;
+    //todo: if c2 is built in command - c2 = null...
+    //todo: if & in cmd_line change this->isBackground to true
 }
 
 void PipeCommand::execute() {
+    if (!c1 || !c2) {
+        //todo: handle error.
+        return;
+    }
 
+    int fd[2];
+    pipe(fd);
+    int pid = fork();
+    int x;
+    int pid2 = 0;
+
+    if (!this->isBackGround || true) {//todo: handle correctly... (problem with jobs... ask ethan)
+        if (pid == 0) {
+            dup2(fd[0], 0);
+            close(fd[0]);
+            close(fd[1]);
+            this->c2->execute();
+        } else {
+            x = dup(1);
+            dup2(fd[1], 1);
+            close(fd[0]);
+            close(fd[1]);
+            this->c1->execute();
+            close(1);
+            dup(x);
+//        wait(NULL);
+            waitpid(pid, NULL, WUNTRACED);
+        }
+        close(fd[0]);
+        close(fd[1]);
+    } else {
+        if (pid == 0) {
+            pid2 = fork();
+            if (pid2 == 0) {
+                dup2(fd[0], 0);
+                close(fd[0]);
+                close(fd[1]);
+                this->c2->execute();
+            } else {
+                x = dup(1);
+                dup2(fd[1], 1);
+                close(fd[0]);
+                close(fd[1]);
+                this->c1->execute();
+                close(1);
+                dup(x);
+                waitpid(pid, NULL, WUNTRACED);
+            }
+        } else {
+//            wait(NULL);
+            waitpid(pid2, NULL, WUNTRACED);
+//            cat Makefile|grep @
+        }
+    }
+
+//    int fd[2];
+//    pipe(fd);
+//    int a = fork();
+//    int b = fork();
+//
+//    if (a == 0) {
+//        dup2(fd[0], 1);
+//        close(fd[0]);
+//        close(fd[1]);
+//        this->c1->execute();
+//    } else if (b == 0) {
+//        dup2(fd[1], 0);
+//        close(fd[0]);
+//        close(fd[1]);
+//        this->c2->execute();
+//    } else {
+//        wait(NULL);
+//        wait(NULL);
+//        wait(NULL);
+////        waitpid(a,NULL, WUNTRACED);
+////        waitpid(b,NULL, WUNTRACED);
+//    }
+//    close(fd[0]);
+//    close(fd[1]);
 }
 
 ExternalCommand::ExternalCommand(const char *cmd_line) : Command(cmd_line) {
@@ -608,4 +697,42 @@ QuitCommand::QuitCommand(const char *cmd_line)
 
 void QuitCommand::execute() {
 
+}
+
+RedirectionCommand::RedirectionCommand(const char *cmd_line) : Command(cmd_line) {
+    std::string cmd_s(cmd_line);
+    int b_pos = cmd_s.find_first_of('>');
+    this->doubleBiggerThan = cmd_line[b_pos + 1] == '>';
+    this->c = this->shell->CreateCommand(cmd_s.substr(0, b_pos).c_str());
+
+    int offset = (this->doubleBiggerThan) ? 1 : 2;
+    this->filename = cmd_s.substr(b_pos + offset);
+}
+
+void RedirectionCommand::prepare() {
+    this->fd = dup(1);
+    close(1);
+}
+
+void RedirectionCommand::cleanup() {
+    close(1);
+    dup(this->fd);
+}
+
+void RedirectionCommand::execute() {
+    this->prepare();
+
+    if(this->doubleBiggerThan){
+        if(open(this->filename.c_str(), O_APPEND|O_RDWR|O_CREAT, S_IRWXU) == -1){
+            perror("bassa lecha");
+        }
+    }else{
+        if(open(this->filename.c_str(), O_TRUNC|O_RDWR|O_CREAT, S_IRWXU) == -1){
+            perror("bassa lecha 2");
+        }
+    }
+
+    this->c->execute();
+
+    this->cleanup();
 }

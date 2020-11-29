@@ -37,8 +37,9 @@ public:
     virtual void execute() = 0;
 
 
-    //virtual void prepare();
-    //virtual void cleanup();
+    virtual void prepare();
+
+    virtual void cleanup();
     // TODO: Add your extra methods if needed
 };
 
@@ -79,6 +80,8 @@ public:
 
 class PipeCommand : public Command {
     // TODO: Add your data members
+    Command *c1, *c2;
+    bool isBackGround;
 public:
     PipeCommand(const char *cmd_line);
 
@@ -88,15 +91,20 @@ public:
 };
 
 class RedirectionCommand : public Command {
-    // TODO: Add your data members
+    Command *c;
+    int fd;
+    bool doubleBiggerThan;
+    std::string filename;
+
 public:
     explicit RedirectionCommand(const char *cmd_line);
 
     virtual ~RedirectionCommand() {}
 
     void execute() override;
-    //void prepare() override;
-    //void cleanup() override;
+
+    void prepare() override;
+    void cleanup() override;
 };
 
 class ChangeDirCommand : public BuiltInCommand {
