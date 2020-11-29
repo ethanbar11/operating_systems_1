@@ -13,7 +13,8 @@ void ctrlZHandler(int sig_num) {
 
         cout << "smash: process " << currentJob->pid << " was stopped\n";
         currentJob->status = Stopped;
-        shell->jobsList.addJob(currentJob->command, currentJob->pid, true);
+        shell->jobsList.addJob(currentJob->command, currentJob->pid, true,
+                               currentJob->ID);
         // Shit for memory management.
         currentJob->command = nullptr;
         delete currentJob;
@@ -35,6 +36,29 @@ void ctrlCHandler(int sig_num) {
 }
 
 void alarmHandler(int sig_num) {
-    // TODO: Add your implementation
+    auto shell = &SmallShell::getInstance();
+    auto currentJob = shell->jobsList.currentJob;
+    if (currentJob != nullptr) {
+        double diff_time = difftime(time(nullptr), currentJob->start_time);
+        if (currentJob->command->timeoutcommand &&
+            diff_time >= currentJob->command->maxTime) {
+            cout << "smash: " << currentJob->command->original_cmd_line
+                 << " timed out\n";
+            kill(currentJob->pid, SIGKILL);
+            delete currentJob;
+            shell->jobsList.currentJob = nullptr;
+        }
+    }
+    for (auto &command :shell->jobsList.jobs) {
+        currentJob = command;
+        if (currentJob->command->timeoutcommand &&
+            difftime(time(nullptr), currentJob->start_time) >=
+            currentJob->command->maxTime) {
+            cout << "smash: " << currentJob->command->original_cmd_line
+                 << " timed out\n";
+            kill(currentJob->pid, SIGKILL);
+        }
+    }
+
 }
 

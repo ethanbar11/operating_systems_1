@@ -14,9 +14,16 @@ int main(int argc, char *argv[]) {
     }
 
     //TODO: setup sig alarm handler
+    struct sigaction sa;
+    sa.sa_handler = alarmHandler;
+    sa.sa_flags = SA_RESTART;
+
+    if (sigaction(SIGALRM, &sa, NULL) < 0) {
+        perror("smash error: failed to set Alaram handler");
+    }
 
     SmallShell &smash = SmallShell::getInstance();
-    while (true) {
+    while (smash.is_running) {
         std::cout << smash.shell_name << "> ";
         std::string cmd_line;
         std::getline(std::cin, cmd_line);

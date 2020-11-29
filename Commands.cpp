@@ -114,6 +114,10 @@ Command *SmallShell::CreateCommand(const char *cmd_line) {
         return new pwdCommand(cmd_line, NULL);
     } else if (strcmp(args[0], "cd") == 0) {
         return new cdCommand(cmd_line, NULL);
+    } else if (strcmp(args[0], "timeout") == 0) {
+        return new TimeoutCommand(cmd_line);
+    } else if (strcmp(args[0], "quit") == 0) {
+        return new QuitCommand(cmd_line);
     }
 
 
@@ -171,7 +175,6 @@ BuiltInCommand::BuiltInCommand(const char *cmd_line) : Command::Command(
 }
 
 Command::Command(const char *cmd_line) {
-//    this->original_cmd_line = string(cmd_line).c_str();
     this->original_cmd_line = (char *) malloc(strlen(cmd_line) + 1);
     strcpy(original_cmd_line, cmd_line);
     // TODO: Need to clean memory of the string
@@ -196,16 +199,20 @@ JobsList::JobsList() {
     currentJob = nullptr;
 }
 
-void JobsList::addJob(Command *cmd, int processID, bool isStopped) {
+void
+JobsList::addJob(Command *cmd, int processID, bool isStopped, int jobID) {
     checkForFinishedJobs();
     // Add usage to stopped.
-    counter++;
+    if (jobID == -1) {
+        counter++;
+        jobID = counter;
+    }
     if (isStopped)
         this->jobs.push_back(
-                new JobEntry(cmd, this->counter, processID, Stopped));
+                new JobEntry(cmd, jobID, processID, Stopped));
     else
         this->jobs.push_back(
-                new JobEntry(cmd, this->counter, processID, Background));
+                new JobEntry(cmd, jobID, processID, Background));
 }
 
 void JobsList::checkForFinishedJobs() {
@@ -214,7 +221,8 @@ void JobsList::checkForFinishedJobs() {
         int status;
         pid = waitpid(-1, &status, WNOHANG);
         if (pid != 0 and pid != -1) {
-            this->removeJobById(pid);
+            auto job = getJobByProcessId(pid);
+            this->removeJobById(job->ID);
         }
     }
     this->setCurrentCounter();
@@ -300,6 +308,7 @@ void PipeCommand::execute() {
 ExternalCommand::ExternalCommand(const char *cmd_line) : Command(cmd_line) {
 //     TODO: To check here for background.
     string line = _trim(this->original_cmd_line);
+    this->timeoutcommand = false;
     if (line.back() == '&')
         this->status = Background;
     std::replace(line.begin(), line.end(), '&', ' ');
@@ -318,7 +327,7 @@ void ExternalCommand::execute() {
                 this->cmd_line, NULL);// this->args_without_start);
     } else { //Father
         if (this->status == Foreground) {
-            this->shell->jobsList.setCurrentJob(this, pid, false);
+            this->shell->jobsList.setCurrentJob(this, pid, -1, false);
             waitpid(pid, NULL, WUNTRACED);
             delete this->shell->jobsList.currentJob;
             this->shell->jobsList.currentJob = nullptr;
@@ -393,7 +402,8 @@ void ForegroundCommand::execute() {
     auto command_to_use = job->command;
     job->command = nullptr;
     shell->jobsList.removeJobById(jobID);
-    this->shell->jobsList.setCurrentJob(command_to_use, job->pid, false);
+    this->shell->jobsList.setCurrentJob(command_to_use, job->pid, jobID,
+                                        false);
     int p_status;
     waitpid(job->pid, &p_status, WUNTRACED);
     if (!WIFSTOPPED(p_status)) {
@@ -447,14 +457,15 @@ KillCommand::KillCommand(const char *cmd_line) : BuiltInCommand(cmd_line) {
         arg = nullptr;
     }
     _parseCommandLine(this->cmd_line, args);
-    auto signum_str = string(args[1]);
-    signum = atoi(signum_str.substr(1, signum_str.size() - 1).c_str());
     if (args[1] == nullptr ||
         args[2] == nullptr) {//Error in number of arguments
         cout << "smash error: kill: invalid arguments" << "\n";
         this->should_operate = false;
         return;
     }
+//    std::string str(args[1]);
+    signum = atoi(args[1]);
+
     auto job = shell->jobsList.getJobById(atoi(args[2]));
     if (job == nullptr) {
         cout << "smash error: kill: job-id " << args[2] << " does not exist"
@@ -468,8 +479,11 @@ KillCommand::KillCommand(const char *cmd_line) : BuiltInCommand(cmd_line) {
 }
 
 void KillCommand::execute() {
-    kill(this->jobPID, signum);
-    cout << "signal number " << signum << "was sent to pid " << jobPID << "\n";
+    if (should_operate) {
+        kill(this->jobPID, signum);
+        cout << "signal number " << signum << " was sent to pid " << jobPID
+             << "\n";
+    }
 }
 
 bool jobscompareJobEntrys(JobEntry *first, JobEntry *second) {
@@ -499,7 +513,7 @@ JobsCommand::JobsCommand(const char *cmd_line) : BuiltInCommand(cmd_line) {
 
 void lsCommand::execute() {
     struct dirent **namelist;
-    vector <string> files = vector<string>();
+    vector<string> files = vector<string>();
     int n;
     int i = 0;
     n = scandir(".", &namelist, NULL, alphasort);
@@ -518,7 +532,8 @@ void pwdCommand::execute() {
     std::cout << cwd << std::endl;
 }
 
-cdCommand::cdCommand(const char *cmd_line, JobsList *jobs) : BuiltInCommand(cmd_line) {
+cdCommand::cdCommand(const char *cmd_line, JobsList *jobs) : BuiltInCommand(
+        cmd_line) {
     char *args[21];
     _parseCommandLine(cmd_line, args);
     this->exe = false;
@@ -550,4 +565,47 @@ void cdCommand::execute() {
     }
 
     shell->last_dir = string(cwd);
+}
+
+TimeoutCommand::TimeoutCommand(const char *cmd_line) : Command(cmd_line) {
+    char *args[21];
+    _parseCommandLine(cmd_line, args);
+    max_time = atoi(args[1]);
+    start_time = time(nullptr);
+    int start_index = strlen(args[0]) + strlen(args[1]) + 2;
+    const char *inner_cmd_string = string(cmd_line).substr(start_index,
+                                                           strlen(cmd_line) -
+                                                           start_index).c_str();
+    this->inner_cmd = this->shell->CreateCommand(inner_cmd_string);
+    this->inner_cmd->timeoutcommand = true;
+    this->inner_cmd->original_cmd_line = this->original_cmd_line;
+    this->inner_cmd->maxTime = max_time;
+}
+
+
+void TimeoutCommand::execute() {
+    alarm(this->inner_cmd->maxTime);
+    this->inner_cmd->execute();
+
+}
+
+QuitCommand::QuitCommand(const char *cmd_line)
+        : BuiltInCommand(cmd_line) {
+    char *args[21];
+    _parseCommandLine(cmd_line, args);
+    this->shell->is_running = false;
+    cout << "smash: sending SIGKILL signal to "
+         << this->shell->jobsList.jobs.size()
+         << " jobs:\n";
+
+    if (strcmp(args[1], "kill") == 0) {
+        for (auto &job : shell->jobsList.jobs) {
+            kill(job->pid, SIGKILL);
+            cout << job->pid << ": " << job->command->original_cmd_line << '\n';
+        }
+    }
+}
+
+void QuitCommand::execute() {
+
 }

@@ -23,6 +23,8 @@ public:
     char *cmd_line;
     char *original_cmd_line;
     bool should_operate;
+    bool timeoutcommand;
+    int maxTime;
 
     Command(const char *cmd_line);
 
@@ -58,6 +60,21 @@ public:
     virtual ~ExternalCommand() {}
 
     void execute() override;
+
+};
+
+class TimeoutCommand : public Command {
+public:
+    int max_time;
+    time_t start_time;
+
+    TimeoutCommand(const char *cmd_line);
+
+    virtual ~TimeoutCommand() {}
+
+    void execute() override;
+
+    Command *inner_cmd;
 };
 
 class PipeCommand : public Command {
@@ -113,7 +130,8 @@ class JobsList;
 
 class QuitCommand : public BuiltInCommand {
 // TODO: Add your data members public:
-    QuitCommand(const char *cmd_line, JobsList *jobs);
+public:
+    QuitCommand(const char *cmd_line);
 
     virtual ~QuitCommand() {}
 
@@ -127,6 +145,7 @@ protected:
     };
     // TODO: Add your data members
 public:
+
     CommandsHistory();
 
     ~CommandsHistory() {}
@@ -192,10 +211,12 @@ public:
 
     ~JobsList() {}
 
-    void addJob(Command *cmd, int processID, bool isStopped = false);
+    void
+    addJob(Command *cmd, int processID, bool isStopped = false, int jobId = -1);
 
-    void setCurrentJob(Command *cmd, int processID, bool isStopped = false) {
-        this->currentJob = new JobEntry(cmd, -1, processID, Foreground);
+    void setCurrentJob(Command *cmd, int processID, int jid,
+                       bool isStopped = false) {
+        this->currentJob = new JobEntry(cmd, jid, processID, Foreground);
     }
 
     void printJobsList();
@@ -282,7 +303,9 @@ private:
 public:
     char *shell_name;
     JobsList jobsList;
+    std::vector<JobsCommand *> timeouts;
     std::string last_dir;
+    bool is_running = true;
 
     Command *CreateCommand(const char *cmd_line);
 
@@ -303,7 +326,8 @@ public:
 
 class lsCommand : public BuiltInCommand {
 public:
-    lsCommand(const char *cmd_line, JobsList *jobs) : BuiltInCommand(cmd_line) {}
+    lsCommand(const char *cmd_line, JobsList *jobs) : BuiltInCommand(
+            cmd_line) {}
 
     virtual ~lsCommand() override {}
 
@@ -312,7 +336,8 @@ public:
 
 class pwdCommand : public BuiltInCommand {
 public:
-    pwdCommand(const char *cmd_line, JobsList *jobs) : BuiltInCommand(cmd_line) {}
+    pwdCommand(const char *cmd_line, JobsList *jobs) : BuiltInCommand(
+            cmd_line) {}
 
     virtual ~pwdCommand() override {}
 
