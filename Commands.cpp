@@ -625,11 +625,13 @@ void lsCommand::execute() {
     struct dirent **namelist;
     vector<string> files = vector<string>();
     int n;
-    int i = 0;
+    int i = -1;
     n = scandir(".", &namelist, NULL, alphasort);
     while (i < n) {
+        i++;
+        if (strcmp(".", namelist[i]->d_name) == 0 || strcmp("..", namelist[i]->d_name) == 0)
+            continue;
         std::cout << namelist[i]->d_name << std::endl;
-        ++i;
     }
 }
 
@@ -787,7 +789,7 @@ void errorCopy(const char *err) {
 
 bool cpCommand::srcExists() {
     struct stat st;
-    if(stat(this->src.c_str(),&st) == 0)
+    if (stat(this->src.c_str(), &st) == 0)
         return true;
     return false;
 //    DIR *dir = opendir(this->src.c_str());
@@ -800,7 +802,7 @@ bool cpCommand::srcExists() {
 }
 
 void cpCommand::execute() {//Son
-    if(!this->srcExists())
+    if (!this->srcExists())
         return;
     int pid = fork();
     int x;
