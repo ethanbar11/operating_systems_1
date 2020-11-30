@@ -382,6 +382,7 @@ public:
 class cpCommand : public BuiltInCommand {
     bool exe, isBackground;
     std::string src, dst;
+
 public:
     cpCommand(const char *cmd_line, bool isBackground);
 
@@ -391,7 +392,8 @@ public:
 
     void copySuccess();
 
-    void srcExists();
+    bool srcExists();
+
 };
 
 #endif //SMASH_COMMAND_H_

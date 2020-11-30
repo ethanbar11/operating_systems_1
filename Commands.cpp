@@ -12,6 +12,7 @@
 #include<stdio.h>
 #include<sys/dir.h>
 #include <fcntl.h>
+#include <sys/stat.h>
 
 using namespace std;
 
@@ -771,8 +772,8 @@ RedirectionCommand::RedirectionCommand(const char *cmd_line) : Command(cmd_line)
     this->doubleBiggerThan = cmd_line[b_pos + 1] == '>';
     this->c = this->shell->CreateCommand(cmd_s.substr(0, b_pos).c_str());
 
-    int offset = (this->doubleBiggerThan) ? 1 : 2;
-    this->filename = cmd_s.substr(b_pos + offset);
+    int offset = (this->doubleBiggerThan) ? 2 : 1;
+    this->filename = _trim(cmd_s.substr(b_pos + offset));
 }
 
 void RedirectionCommand::prepare() {
@@ -816,8 +817,6 @@ cpCommand::cpCommand(const char *cmd_line, bool isBackground) : BuiltInCommand(c
         this->dst = string(args[2]);
         this->exe = true;
     }
-
-    this->srcExists();
 }
 
 void cpCommand::copySuccess() {
@@ -829,15 +828,23 @@ void errorCopy(const char *err) {
     exit(1);
 }
 
-void cpCommand::srcExists() {
-    DIR *dir = opendir(this->src.c_str());
-    if (!dir) {
-        errorCopy("smash: file not found");
-    }
-    closedir(dir);
+bool cpCommand::srcExists() {
+    struct stat st;
+    if(stat(this->src.c_str(),&st) == 0)
+        return true;
+    return false;
+//    DIR *dir = opendir(this->src.c_str());
+//    if (!dir) {
+//        perror("smash: file not found");
+//        return false;
+//    }
+//    closedir(dir);
+//    return true;
 }
 
 void cpCommand::execute() {//Son
+    if(!this->srcExists())
+        return;
     int pid = fork();
     int x;
 
