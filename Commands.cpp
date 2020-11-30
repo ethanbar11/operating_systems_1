@@ -68,6 +68,13 @@ bool _isBackgroundComamnd(const char *cmd_line) {
     return str[str.find_last_not_of(WHITESPACE)] == '&';
 }
 
+bool is_number(const std::string &s) {
+    return !s.empty() && std::find_if(s.begin(),
+                                      s.end(), [](unsigned char c) {
+                return !std::isdigit(c);
+            }) == s.end();
+}
+
 void _removeBackgroundSign(char *cmd_line) {
     const string str(cmd_line);
     // find last character other than spaces
@@ -143,6 +150,9 @@ Command *SmallShell::CreateCommand(const char *cmd_line) {
 }
 
 void SmallShell::executeCommand(const char *cmd_line) {
+    if (strcmp(cmd_line, "") == 0 || strcmp(cmd_line, "\n") == 0
+        || strcmp(cmd_line, "\r") == 0 || strcmp(cmd_line, "\t") == 0)
+        return;
     this->jobsList.checkForFinishedJobs();
     Command *cmd = CreateCommand(cmd_line);
     cmd->execute();
@@ -162,7 +172,7 @@ void ChangePromptCommand::execute() {
 ChangePromptCommand::ChangePromptCommand(const char *cmdLine)
         : BuiltInCommand(cmdLine) {
     char *args[21];
-    _parseCommandLine(cmd_line, args);
+    _parseCommandLine(cmdLine, args);
     char *new_name = "smash";
     if (args[1]) {
         new_name = args[1];
@@ -189,7 +199,7 @@ Command::Command(const char *cmd_line) {
 Command::~Command() {}
 
 void ShowPidCommand::execute() {
-    std::cout << ::getpid() << "\n";
+    std::cout << "smash pid is " << ::getpid() << "\n";
 
 }
 
@@ -367,75 +377,6 @@ void PipeCommand::execute() {
         }
     }
 }
-//    if (this->second_command->status != Background) {
-//        //todo: handle correctly... (problem with jobs... ask ethan)
-//        if (pid == 0) {
-//            dup2(fd[0], 0);
-//            close(fd[0]);
-//            close(fd[1]);
-//            this->second_command->execute();
-//        } else {
-//            x = dup(1);
-//            dup2(fd[1], 1);
-//            close(fd[0]);
-//            close(fd[1]);
-//            this->first_command->execute();
-//            close(1);
-//            dup(x);
-//            waitpid(pid, NULL, WUNTRACED);
-//        }
-//        close(fd[0]);
-//        close(fd[1]);
-//    } else {
-//        if (pid == 0) {
-//            pid2 = fork();
-//            if (pid2 == 0) {
-//                dup2(fd[0], 0);
-//                close(fd[0]);
-//                close(fd[1]);
-//                this->second_command->execute();
-//            } else {
-//                x = dup(1);
-//                dup2(fd[1], 1);
-//                close(fd[0]);
-//                close(fd[1]);
-//                this->first_command->execute();
-//                close(1);
-//                dup(x);
-//                waitpid(pid, NULL, WUNTRACED);
-//            }
-//        } else {
-////            wait(NULL);
-//            waitpid(pid2, NULL, WUNTRACED);
-////            cat Makefile|grep @
-//        }
-
-
-//    int fd[2];
-//    pipe(fd);
-//    int a = fork();
-//    int b = fork();
-//
-//    if (a == 0) {
-//        dup2(fd[0], 1);
-//        close(fd[0]);
-//        close(fd[1]);
-//        this->first_command->execute();
-//    } else if (b == 0) {
-//        dup2(fd[1], 0);
-//        close(fd[0]);
-//        close(fd[1]);
-//        this->c2->execute();
-//    } else {
-//        wait(NULL);
-//        wait(NULL);
-//        wait(NULL);
-////        waitpid(a,NULL, WUNTRACED);
-////        waitpid(b,NULL, WUNTRACED);
-//    }
-//    close(fd[0]);
-//    close(fd[1]);
-
 
 ExternalCommand::ExternalCommand(const char *cmd_line) : Command(cmd_line) {
 //     TODO: To check here for background.
@@ -492,7 +433,8 @@ int Command::GetMaxStoppedJobID(char *const *args) const {
     int jobIdLocal = -1;
     if (args[1] != nullptr) {
         jobIdLocal = atoi(args[1]);
-        if (this->shell->jobsList.getJobById(jobIdLocal) == nullptr)
+        auto job = this->shell->jobsList.getJobById(jobIdLocal);
+        if (job == nullptr || job->status == Background)
             return -1;
 
     } else {
@@ -607,15 +549,29 @@ KillCommand::KillCommand(const char *cmd_line) : BuiltInCommand(cmd_line) {
         arg = nullptr;
     }
     _parseCommandLine(this->cmd_line, args);
-    if (args[1] == nullptr ||
-        args[2] == nullptr) {//Error in number of arguments
+    if (args[1] == nullptr || args[1][0] != '-' ||
+        args[2] == nullptr ||
+        args[3] != nullptr) {//Error in number of arguments
         cout << "smash error: kill: invalid arguments" << "\n";
         this->should_operate = false;
         return;
     }
 //    std::string str(args[1]);
-    signum = atoi(args[1]);
-
+    string signum_as_str = string(args[1]);
+    const char *part_of_signum_as_str = signum_as_str.substr(1,
+                                                             signum_as_str.size() -
+                                                             1).c_str();
+    if (!is_number(part_of_signum_as_str)) {
+        cout << "smash error: kill: invalid arguments" << "\n";
+        this->should_operate = false;
+        return;
+    }
+    signum = atoi(part_of_signum_as_str);
+    if (signum > 32) {
+        cout << "smash error: kill: invalid arguments" << "\n";
+        this->should_operate = false;
+        return;
+    }
     auto job = shell->jobsList.getJobById(atoi(args[2]));
     if (job == nullptr) {
         cout << "smash error: kill: job-id " << args[2] << " does not exist"
@@ -647,7 +603,8 @@ void JobsCommand::execute() {
         string status_string = "";
         if (job->status == Stopped)
             status_string = " (stopped)";
-        cout << job->ID << " " << job->command->original_cmd_line << " : "
+        cout << "[" << job->ID << "] " << job->command->original_cmd_line
+             << " : "
              << job->pid
              << " " << difftime(time(nullptr), job->start_time) << " secs"
              << status_string

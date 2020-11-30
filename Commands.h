@@ -204,10 +204,7 @@ public:
         this->command = cmd;
         this->ID = id;
         this->pid = processID;
-        if (processID2 != -1)
-            this->pid2 = processID2;
-        else
-            this->pid = -1;
+        this->pid2=processID2;
         this->status = status;
         start_time = time(nullptr);
         // TODO: Add start time.
