@@ -98,7 +98,7 @@ Command *SmallShell::CreateCommand(const char *cmd_line) {
     char *args[21];
     _parseCommandLine(cmd_line, args);
     // Built in commands
-    if (cmd_s.find('>')) {
+    if (cmd_s.find('>') != string::npos) {
         return new RedirectionCommand(cmd_line);
     }
     if (strcmp(args[0], "chprompt") == 0) {
@@ -119,6 +119,8 @@ Command *SmallShell::CreateCommand(const char *cmd_line) {
         return new pwdCommand(cmd_line, NULL);
     } else if (strcmp(args[0], "cd") == 0) {
         return new cdCommand(cmd_line, NULL);
+    } else if (strcmp(args[0], "cp") == 0) {
+        return new cpCommand(cmd_line, _isBackgroundComamnd(cmd_line));
     } else if (strcmp(args[0], "timeout") == 0) {
         return new TimeoutCommand(cmd_line);
     } else if (strcmp(args[0], "quit") == 0) {
@@ -324,7 +326,7 @@ void PipeCommand::execute() {
     int x;
     int pid2 = 0;
 
-    if (!this->isBackGround || true) {//todo: handle correctly... (problem with jobs... ask ethan)
+    if (!this->isBackGround) {//todo: handle correctly... (problem with jobs... ask ethan)
         if (pid == 0) {
             dup2(fd[0], 0);
             close(fd[0]);
@@ -722,17 +724,106 @@ void RedirectionCommand::cleanup() {
 void RedirectionCommand::execute() {
     this->prepare();
 
-    if(this->doubleBiggerThan){
-        if(open(this->filename.c_str(), O_APPEND|O_RDWR|O_CREAT, S_IRWXU) == -1){
-            perror("bassa lecha");
+    if (this->doubleBiggerThan) {
+        if (open(this->filename.c_str(), O_APPEND | O_RDWR | O_CREAT, S_IRWXU) == -1) {
+            perror("bassa lecha");//todo: change to correct error method.
         }
-    }else{
-        if(open(this->filename.c_str(), O_TRUNC|O_RDWR|O_CREAT, S_IRWXU) == -1){
-            perror("bassa lecha 2");
+    } else {
+        if (open(this->filename.c_str(), O_TRUNC | O_RDWR | O_CREAT, S_IRWXU) == -1) {
+            perror("bassa lecha 2");//todo: change to correct error method
         }
     }
 
     this->c->execute();
 
     this->cleanup();
+}
+
+cpCommand::cpCommand(const char *cmd_line, bool isBackground) : BuiltInCommand(cmd_line), isBackground(isBackground) {
+    char *args[21];
+    _parseCommandLine(cmd_line, args);
+    this->exe = false;
+    if (args[3]) {
+        std::cout << "smash error: cd: too many arguments" << std::endl;
+    } else if (strcmp(args[1], "-") == 0 && shell->last_dir.empty()) {
+        std::cout << "smash error: cd: OLDPWD not set" << std::endl;//todo: maybe to perror.
+    } else {
+        this->src = string(args[1]);
+        this->dst = string(args[2]);
+        this->exe = true;
+    }
+
+    this->srcExists();
+}
+
+void cpCommand::copySuccess() {
+    std::cout << "smash: " << this->src << " was copied to " << this->dst << endl;
+}
+
+void errorCopy(const char *err) {
+    perror(err);//todo: handle error.
+    exit(1);
+}
+
+void cpCommand::srcExists() {
+    DIR *dir = opendir(this->src.c_str());
+    if (!dir) {
+        errorCopy("smash: file not found");
+    }
+    closedir(dir);
+}
+
+void cpCommand::execute() {//Son
+    int pid = fork();
+    int x;
+
+    if (pid < 0) {
+        perror("smash: error: fork failed");//todo: handle error.
+        return;
+    } else if (pid == 0) {
+        char fileBuff[MAX_BUFF];
+        int src_fd, dst_fd, curr_fd = 1;
+        src_fd = open(this->src.c_str(), O_RDONLY);
+        if (src_fd == -1) {
+            errorCopy("smash: open failed");
+        }
+        dst_fd = open(this->dst.c_str(), O_CREAT | O_TRUNC | O_RDWR, S_IRWXU | S_IRWXG | S_IRWXO);
+        if (dst_fd == -1) {
+            close(src_fd);
+            errorCopy("smash: open failed");
+        }
+
+        while (curr_fd) {
+            curr_fd = read(src_fd, &fileBuff, MAX_BUFF);
+            if (curr_fd == -1) {
+                close(src_fd);
+                close(dst_fd);
+                errorCopy("smash: read failed");
+            }
+            int res = write(dst_fd, &fileBuff, curr_fd);
+            if (res == -1) {
+                close(dst_fd);
+                close(src_fd);
+                errorCopy("smash: write failed");
+            }
+        }
+        if (close(dst_fd) == -1) {
+            close(src_fd);
+            errorCopy("smash: close failed");
+        }
+        if (close(src_fd) == -1)
+            errorCopy("smash: close failed");
+        this->copySuccess();
+        exit(0);
+    } else {//Father
+        if (this->isBackground) {
+            shell->jobsList.checkForFinishedJobs();
+            shell->jobsList.addJob(this, pid);
+        } else {
+            this->shell->jobsList.setCurrentJob(this, pid, -1, false);
+            waitpid(pid, NULL, WUNTRACED);
+            delete this->shell->jobsList.currentJob;
+            this->shell->jobsList.currentJob = nullptr;
+        }
+    }
 }

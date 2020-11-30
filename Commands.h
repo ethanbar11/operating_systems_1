@@ -37,9 +37,9 @@ public:
     virtual void execute() = 0;
 
 
-    virtual void prepare();
-
-    virtual void cleanup();
+//    virtual void prepare();
+//
+//    virtual void cleanup();
     // TODO: Add your extra methods if needed
 };
 
@@ -103,8 +103,8 @@ public:
 
     void execute() override;
 
-    void prepare() override;
-    void cleanup() override;
+    void prepare();
+    void cleanup();
 };
 
 class ChangeDirCommand : public BuiltInCommand {
@@ -362,6 +362,21 @@ public:
     virtual ~cdCommand() override {}
 
     void execute() override;
+};
+
+class cpCommand : public BuiltInCommand {
+    bool exe, isBackground;
+    std::string src, dst;
+public:
+    cpCommand(const char *cmd_line, bool isBackground);
+
+    virtual ~cpCommand() override {}
+
+    void execute() override;
+
+    void copySuccess();
+
+    void srcExists();
 };
 
 #endif //SMASH_COMMAND_H_
