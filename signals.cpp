@@ -14,12 +14,16 @@ void ctrlZHandler(int sig_num) {
         cout << "smash: process " << currentJob->pid << " was stopped\n";
         currentJob->status = Stopped;
         shell->jobsList.addJob(currentJob->command, currentJob->pid, true,
-                               currentJob->ID);
+                               currentJob->ID, currentJob->pid2);
         // Shit for memory management.
         currentJob->command = nullptr;
         delete currentJob;
         shell->jobsList.currentJob = nullptr;
         kill(currentJob->pid, SIGSTOP);
+
+        if (currentJob->pid2 != -1) {
+            kill(currentJob->pid2, SIGSTOP);
+        }
     }
 }
 
@@ -30,6 +34,8 @@ void ctrlCHandler(int sig_num) {
     if (currentJob != nullptr) {
         cout << "smash: process " << currentJob->pid << " was killed\n";
         kill(currentJob->pid, SIGKILL);
+        if (currentJob->pid2 != -1)
+            kill(currentJob->pid2, SIGKILL);
         delete currentJob;
         shell->jobsList.currentJob = nullptr;
     }

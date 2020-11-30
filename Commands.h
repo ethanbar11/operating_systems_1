@@ -37,9 +37,6 @@ public:
     virtual void execute() = 0;
 
 
-    virtual void prepare();
-
-    virtual void cleanup();
     // TODO: Add your extra methods if needed
 };
 
@@ -80,7 +77,10 @@ public:
 
 class PipeCommand : public Command {
     // TODO: Add your data members
-    Command *c1, *c2;
+    Command *first_command;
+    ExternalCommand *second_command;
+    bool regularPipe;
+
     bool isBackGround;
 public:
     PipeCommand(const char *cmd_line);
@@ -88,6 +88,8 @@ public:
     virtual ~PipeCommand() {}
 
     void execute() override;
+
+    bool is_built_in;
 };
 
 class RedirectionCommand : public Command {
@@ -103,8 +105,9 @@ public:
 
     void execute() override;
 
-    void prepare() override;
-    void cleanup() override;
+    void prepare();
+
+    void cleanup();
 };
 
 class ChangeDirCommand : public BuiltInCommand {
@@ -193,16 +196,23 @@ public:
     time_t start_time;
     int ID;
     int pid;
+    int pid2;
     JobStatus status;
 
-    JobEntry(Command *cmd, int id, int processID, JobStatus status) {
+    JobEntry(Command *cmd, int id, int processID, JobStatus status,
+             int processID2 = -1) {
         this->command = cmd;
         this->ID = id;
         this->pid = processID;
+        if (processID2 != -1)
+            this->pid2 = processID2;
+        else
+            this->pid = -1;
         this->status = status;
         start_time = time(nullptr);
         // TODO: Add start time.
     }
+
 };
 
 class JobsList {
@@ -220,11 +230,13 @@ public:
     ~JobsList() {}
 
     void
-    addJob(Command *cmd, int processID, bool isStopped = false, int jobId = -1);
+    addJob(Command *cmd, int processID, bool isStopped = false, int jobID = -1,
+           int processID2 = -1);
 
-    void setCurrentJob(Command *cmd, int processID, int jid,
-                       bool isStopped = false) {
-        this->currentJob = new JobEntry(cmd, jid, processID, Foreground);
+    void setCurrentJob(Command *cmd, int processID, int jobID,
+                       bool isStopped = false, int pid2 = -1) {
+        this->currentJob = new JobEntry(cmd, jobID, processID, Foreground,
+                                        pid2);
     }
 
     void printJobsList();

@@ -53,7 +53,7 @@ int _parseCommandLine(const char *cmd_line, char **args) {
     int i = 0;
     std::istringstream iss(_trim(string(cmd_line)).c_str());
     for (std::string s; iss >> s;) {
-        args[i] = (char *) malloc(s.length() + 1);
+        args[i] = new char[s.length() + 1];
         memset(args[i], 0, s.length() + 1);
         strcpy(args[i], s.c_str());
         args[++i] = NULL;
@@ -98,7 +98,7 @@ Command *SmallShell::CreateCommand(const char *cmd_line) {
     char *args[21];
     _parseCommandLine(cmd_line, args);
     // Built in commands
-    if (cmd_s.find('>')) {
+    if (cmd_s.find('>') != string::npos) {
         return new RedirectionCommand(cmd_line);
     }
     if (strcmp(args[0], "chprompt") == 0) {
@@ -180,7 +180,7 @@ BuiltInCommand::BuiltInCommand(const char *cmd_line) : Command::Command(
 
 Command::Command(const char *cmd_line) {
 //    this->original_cmd_line = string(cmd_line).c_str();
-    this->original_cmd_line = (char *) malloc(strlen(cmd_line) + 1);
+    this->original_cmd_line = new char[strlen(cmd_line) + 1];
     strcpy(original_cmd_line, cmd_line);
     // TODO: Need to clean memory of the string
     this->shell = &SmallShell::getInstance();
@@ -205,7 +205,8 @@ JobsList::JobsList() {
 }
 
 void
-JobsList::addJob(Command *cmd, int processID, bool isStopped, int jobID) {
+JobsList::addJob(Command *cmd, int processID, bool isStopped, int jobID,
+                 int processID2) {
     checkForFinishedJobs();
     // Add usage to stopped.
     if (jobID == -1) {
@@ -214,10 +215,10 @@ JobsList::addJob(Command *cmd, int processID, bool isStopped, int jobID) {
     }
     if (isStopped)
         this->jobs.push_back(
-                new JobEntry(cmd, jobID, processID, Stopped));
+                new JobEntry(cmd, jobID, processID, Stopped, processID2));
     else
         this->jobs.push_back(
-                new JobEntry(cmd, jobID, processID, Background));
+                new JobEntry(cmd, jobID, processID, Background, processID2));
 }
 
 void JobsList::checkForFinishedJobs() {
@@ -227,7 +228,8 @@ void JobsList::checkForFinishedJobs() {
         pid = waitpid(-1, &status, WNOHANG);
         if (pid != 0 and pid != -1) {
             auto job = getJobByProcessId(pid);
-            this->removeJobById(job->ID);
+            if (job != nullptr) // Meaning its probably pipe left
+                this->removeJobById(job->ID);
         }
     }
     this->setCurrentCounter();
@@ -263,7 +265,7 @@ JobEntry *JobsList::getJobById(int jobId) {
 
 JobEntry *JobsList::getJobByProcessId(int processID) {
     for (auto &job : this->jobs)
-        if (job->pid == processID)
+        if (job->pid == processID || job->pid2 == processID)
             return job;
     return nullptr;
 }
@@ -298,22 +300,20 @@ PipeCommand::PipeCommand(const char *cmd_line) : Command(cmd_line) {
     int pipe_position = cmd_s.find("|");
 //    string first_command =
     int second_part_length = cmd_s.length() - pipe_position;
-    Command *first_command = this->shell->CreateCommand(
+    first_command = this->shell->CreateCommand(
             cmd_s.substr(0, pipe_position).c_str());
-    Command *second_command = this->shell->CreateCommand(
+    second_command = dynamic_cast<ExternalCommand *>(this->shell->CreateCommand(
             cmd_s.substr(pipe_position + 1,
-                         second_part_length).c_str());
-    c1 = first_command;
-    c2 = second_command;
-    this->isBackGround = dynamic_cast<BuiltInCommand *>(this->c1) == nullptr &&
-                         cmd_s.find('&') != std::string::npos &&
-                         cmd_s.find('&') > pipe_position;
+                         second_part_length).c_str()));
+    this->regularPipe = cmd_line[pipe_position + 1] == '&';
+    this->is_built_in =
+            dynamic_cast<BuiltInCommand *>(first_command) != nullptr;
     //todo: if c2 is built in command - c2 = null...
     //todo: if & in cmd_line change this->isBackground to true
 }
 
 void PipeCommand::execute() {
-    if (!c1 || !c2) {
+    if (!first_command || !second_command) {
         //todo: handle error.
         return;
     }
@@ -322,51 +322,94 @@ void PipeCommand::execute() {
     pipe(fd);
     int pid = fork();
     int x;
-    int pid2 = 0;
 
-    if (!this->isBackGround || true) {//todo: handle correctly... (problem with jobs... ask ethan)
-        if (pid == 0) {
-            dup2(fd[0], 0);
-            close(fd[0]);
-            close(fd[1]);
-            this->c2->execute();
-        } else {
-            x = dup(1);
-            dup2(fd[1], 1);
-            close(fd[0]);
-            close(fd[1]);
-            this->c1->execute();
-            close(1);
-            dup(x);
-//        wait(NULL);
-            waitpid(pid, NULL, WUNTRACED);
-        }
+    if (pid == 0) { //Son
+        dup2(fd[0], 0);
         close(fd[0]);
         close(fd[1]);
-    } else {
-        if (pid == 0) {
-            pid2 = fork();
-            if (pid2 == 0) {
-                dup2(fd[0], 0);
-                close(fd[0]);
-                close(fd[1]);
-                this->c2->execute();
-            } else {
-                x = dup(1);
-                dup2(fd[1], 1);
-                close(fd[0]);
-                close(fd[1]);
-                this->c1->execute();
-                close(1);
-                dup(x);
-                waitpid(pid, NULL, WUNTRACED);
-            }
+        // So the shell will wait to whatever it is.
+        this->second_command->status = Foreground;
+        this->second_command->execute();
+        exit(0);
+
+    } else { //Father
+        x = dup(1);
+        dup2(fd[1], 1);
+        close(fd[0]);
+        close(fd[1]);
+        if (this->is_built_in) {
+            this->first_command->execute();
         } else {
-//            wait(NULL);
-            waitpid(pid2, NULL, WUNTRACED);
-//            cat Makefile|grep @
+            int pid2 = fork();
+            if (pid2 == 0) { // Second son
+                this->first_command->execute();
+                exit(0);
+            } else { //Still father
+                if (second_command->status == Foreground) {
+                    this->shell->jobsList.setCurrentJob(this, pid, -1, false,
+                                                        pid2);
+                    waitpid(pid2, NULL, WUNTRACED);
+                    delete this->shell->jobsList.currentJob;
+                    this->shell->jobsList.currentJob = nullptr;
+
+                } else {
+                    this->shell->jobsList.addJob(this, pid, false, -1, pid2);
+                }
+            }
+        }
+        close(1);
+        dup(x);
+        if (second_command->status == Foreground) {
+            this->shell->jobsList.setCurrentJob(this, pid, -1, false);
+            waitpid(pid, NULL, WUNTRACED);
+            delete this->shell->jobsList.currentJob;
+            this->shell->jobsList.currentJob = nullptr;
         }
     }
+}
+//    if (this->second_command->status != Background) {
+//        //todo: handle correctly... (problem with jobs... ask ethan)
+//        if (pid == 0) {
+//            dup2(fd[0], 0);
+//            close(fd[0]);
+//            close(fd[1]);
+//            this->second_command->execute();
+//        } else {
+//            x = dup(1);
+//            dup2(fd[1], 1);
+//            close(fd[0]);
+//            close(fd[1]);
+//            this->first_command->execute();
+//            close(1);
+//            dup(x);
+//            waitpid(pid, NULL, WUNTRACED);
+//        }
+//        close(fd[0]);
+//        close(fd[1]);
+//    } else {
+//        if (pid == 0) {
+//            pid2 = fork();
+//            if (pid2 == 0) {
+//                dup2(fd[0], 0);
+//                close(fd[0]);
+//                close(fd[1]);
+//                this->second_command->execute();
+//            } else {
+//                x = dup(1);
+//                dup2(fd[1], 1);
+//                close(fd[0]);
+//                close(fd[1]);
+//                this->first_command->execute();
+//                close(1);
+//                dup(x);
+//                waitpid(pid, NULL, WUNTRACED);
+//            }
+//        } else {
+////            wait(NULL);
+//            waitpid(pid2, NULL, WUNTRACED);
+////            cat Makefile|grep @
+//        }
+
 
 //    int fd[2];
 //    pipe(fd);
@@ -377,7 +420,7 @@ void PipeCommand::execute() {
 //        dup2(fd[0], 1);
 //        close(fd[0]);
 //        close(fd[1]);
-//        this->c1->execute();
+//        this->first_command->execute();
 //    } else if (b == 0) {
 //        dup2(fd[1], 0);
 //        close(fd[0]);
@@ -392,7 +435,7 @@ void PipeCommand::execute() {
 //    }
 //    close(fd[0]);
 //    close(fd[1]);
-}
+
 
 ExternalCommand::ExternalCommand(const char *cmd_line) : Command(cmd_line) {
 //     TODO: To check here for background.
@@ -400,8 +443,11 @@ ExternalCommand::ExternalCommand(const char *cmd_line) : Command(cmd_line) {
     this->timeoutcommand = false;
     if (line.back() == '&')
         this->status = Background;
+    else {
+        this->status = Foreground;
+    }
     std::replace(line.begin(), line.end(), '&', ' ');
-    this->cmd_line = (char *) malloc(line.size() + 1);
+    this->cmd_line = new char[line.size() + 1];
     strcpy(this->cmd_line, line.c_str());
 }
 
@@ -488,14 +534,21 @@ void ForegroundCommand::execute() {
     auto job = shell->jobsList.getJobById(jobID);
     cout << job->command->original_cmd_line << " : " << job->pid << "\n";
     kill(job->pid, SIGCONT);
+    if (job->pid2 != -1)
+        kill(job->pid2, SIGCONT);
+
     auto command_to_use = job->command;
     job->command = nullptr;
     shell->jobsList.removeJobById(jobID);
     this->shell->jobsList.setCurrentJob(command_to_use, job->pid, jobID,
-                                        false);
+                                        false, job->pid2);
     int p_status;
     waitpid(job->pid, &p_status, WUNTRACED);
+    if (job->pid2 != -1) {
+        waitpid(job->pid2, &p_status, WUNTRACED);
+    }
     if (!WIFSTOPPED(p_status)) {
+        //TODO might be bug without handling pid2
         delete this->shell->jobsList.currentJob;
         this->shell->jobsList.currentJob = nullptr;
 
@@ -516,13 +569,18 @@ BackgroundCommand::BackgroundCommand(const char *cmd_line)
     }
     jobID = GetMaxStoppedJobID(args);
     if (jobID == -1) { // Error in job id
-        auto job = shell->jobsList.getJobById(atoi(args[1]));
-        if (job == nullptr)
-            cout << "smash error: bg: job-id " << args[1] << " does not exist"
-                 << "\n";
-        else //TODO: might be a problem here if no job was told to be bg'd.
-            cout << "smash error: bg: job-id " << args[1]
-                 << " is already running in the background" << "\n";
+        if (args[1] != nullptr) {
+            auto job = shell->jobsList.getJobById(atoi(args[1]));
+            if (job == nullptr)
+                cout << "smash error: bg: job-id " << args[1]
+                     << " does not exist"
+                     << "\n";
+            else //TODO: might be a problem here if no job was told to be bg'd.
+                cout << "smash error: bg: job-id " << args[1]
+                     << " is already running in the background" << "\n";
+        } else {
+            cout << "smash error: bg: there is no stopped jobs to resume\n";
+        }
 
         this->should_operate = false;
         return;
@@ -537,6 +595,9 @@ void BackgroundCommand::execute() {
     auto job = shell->jobsList.getJobById(jobID);
     cout << job->command->original_cmd_line << " : " << job->pid << "\n";
     kill(job->pid, SIGCONT);
+    if (job->pid2 != -1)
+        kill(job->pid2, SIGCONT);
+
     job->status = Background;
 }
 
@@ -683,13 +744,16 @@ QuitCommand::QuitCommand(const char *cmd_line)
     char *args[21];
     _parseCommandLine(cmd_line, args);
     this->shell->is_running = false;
-    cout << "smash: sending SIGKILL signal to "
-         << this->shell->jobsList.jobs.size()
-         << " jobs:\n";
+    if (args[1] != NULL && strcmp(args[1], "kill") == 0) {
+        cout << "smash: sending SIGKILL signal to "
+             << this->shell->jobsList.jobs.size()
+             << " jobs:\n";
 
-    if (strcmp(args[1], "kill") == 0) {
         for (auto &job : shell->jobsList.jobs) {
             kill(job->pid, SIGKILL);
+            if (job->pid2 != -1)
+                kill(job->pid2, SIGKILL);
+
             cout << job->pid << ": " << job->command->original_cmd_line << '\n';
         }
     }
@@ -699,7 +763,8 @@ void QuitCommand::execute() {
 
 }
 
-RedirectionCommand::RedirectionCommand(const char *cmd_line) : Command(cmd_line) {
+RedirectionCommand::RedirectionCommand(const char *cmd_line) : Command(
+        cmd_line) {
     std::string cmd_s(cmd_line);
     int b_pos = cmd_s.find_first_of('>');
     this->doubleBiggerThan = cmd_line[b_pos + 1] == '>';
@@ -722,12 +787,14 @@ void RedirectionCommand::cleanup() {
 void RedirectionCommand::execute() {
     this->prepare();
 
-    if(this->doubleBiggerThan){
-        if(open(this->filename.c_str(), O_APPEND|O_RDWR|O_CREAT, S_IRWXU) == -1){
+    if (this->doubleBiggerThan) {
+        if (open(this->filename.c_str(), O_APPEND | O_RDWR | O_CREAT,
+                 S_IRWXU) == -1) {
             perror("bassa lecha");
         }
-    }else{
-        if(open(this->filename.c_str(), O_TRUNC|O_RDWR|O_CREAT, S_IRWXU) == -1){
+    } else {
+        if (open(this->filename.c_str(), O_TRUNC | O_RDWR | O_CREAT, S_IRWXU) ==
+            -1) {
             perror("bassa lecha 2");
         }
     }
