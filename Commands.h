@@ -323,7 +323,7 @@ private:
 public:
     char *shell_name;
     JobsList jobsList;
-    std::vector<JobsCommand *> timeouts;
+    std::vector<int> timeouts;
     std::string last_dir;
     bool is_running = true;
 

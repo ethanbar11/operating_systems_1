@@ -99,12 +99,17 @@ void _removeBackgroundSign(char *cmd_line) {
 */
 Command *SmallShell::CreateCommand(const char *cmd_line) {
     string cmd_s = string(cmd_line);
+    auto background_sign_pos = cmd_s.find_last_of('&');
+    if (background_sign_pos != string::npos) {
+        if (cmd_line[background_sign_pos - 1] != '|')
+            cmd_s.insert(background_sign_pos, " ");
+    }
     int pipe_position = cmd_s.find("|");
     if (pipe_position != string::npos) {
         return new PipeCommand(cmd_line);
     }
     char *args[21];
-    _parseCommandLine(cmd_line, args);
+    _parseCommandLine(cmd_s.c_str(), args);
     // Built in commands
     if (cmd_s.find('>') != string::npos) {
         return new RedirectionCommand(cmd_line);
@@ -202,7 +207,7 @@ Command::Command(const char *cmd_line) {
 Command::~Command() {}
 
 void ShowPidCommand::execute() {
-    std::cout << "smash pid is " << ::getpid() << "\n";
+//    std::cout << "smash pid is " << ::getpid() << "\n";
 
 }
 
@@ -402,7 +407,7 @@ void ExternalCommand::execute() {
         cout << "Problem Forking, why?!!!";
     } else if (pid == 0) { // Son
         setpgrp();
-        ::execl("/bin/bash", "bash", "-c",
+        ::execl("/bin/bash", "/bin/bash", "-c",
                 this->cmd_line, NULL);// this->args_without_start);
     } else { //Father
         if (this->status == Foreground) {
@@ -629,7 +634,10 @@ void lsCommand::execute() {
     n = scandir(".", &namelist, NULL, alphasort);
     while (i < n) {
         i++;
-        if (strcmp(".", namelist[i]->d_name) == 0 || strcmp("..", namelist[i]->d_name) == 0)
+        if (!namelist[i])
+            continue;
+        else if (strcmp(".", namelist[i]->d_name) == 0 ||
+                 strcmp("..", namelist[i]->d_name) == 0)
             continue;
         std::cout << namelist[i]->d_name << std::endl;
     }
@@ -672,7 +680,7 @@ void cdCommand::execute() {
         this->path = string(shell->last_dir);
     }
     if (chdir(this->path.c_str()) != 0) {
-        perror("nope");//todo: change to right error handling...
+        perror("smash error: chdir failed");
         return;
     }
 
@@ -682,6 +690,12 @@ void cdCommand::execute() {
 TimeoutCommand::TimeoutCommand(const char *cmd_line) : Command(cmd_line) {
     char *args[21];
     _parseCommandLine(cmd_line, args);
+    if (args[1] == nullptr || args[2] == nullptr) {
+        cout << "smash error: timeout: invalid arguments\n";
+        this->should_operate = false;
+        return;
+    }
+    this->should_operate = true;
     max_time = atoi(args[1]);
     start_time = time(nullptr);
     int start_index = strlen(args[0]) + strlen(args[1]) + 2;
@@ -696,8 +710,16 @@ TimeoutCommand::TimeoutCommand(const char *cmd_line) : Command(cmd_line) {
 
 
 void TimeoutCommand::execute() {
-    alarm(this->inner_cmd->maxTime);
-    this->inner_cmd->execute();
+    if (this->should_operate) {
+        auto final_time = this->inner_cmd->maxTime + time(nullptr);
+        this->shell->timeouts.push_back(final_time);
+        auto timeouts = this->shell->timeouts;
+        sort(timeouts.begin(), timeouts.end());
+        auto timeout_minimal = *timeouts.begin() - time(nullptr);
+//        cout << "Minimal new time: " << timeout_minimal << "\n";
+        alarm(timeout_minimal);
+        this->inner_cmd->execute();
+    }
 
 }
 
@@ -725,7 +747,8 @@ void QuitCommand::execute() {
 
 }
 
-RedirectionCommand::RedirectionCommand(const char *cmd_line) : Command(cmd_line) {
+RedirectionCommand::RedirectionCommand(const char *cmd_line) : Command(
+        cmd_line) {
     std::string cmd_s(cmd_line);
     int b_pos = cmd_s.find_first_of('>');
     this->doubleBiggerThan = cmd_line[b_pos + 1] == '>';
@@ -749,28 +772,31 @@ void RedirectionCommand::execute() {
     this->prepare();
 
     if (this->doubleBiggerThan) {
-        if (open(this->filename.c_str(), O_APPEND | O_RDWR | O_CREAT, S_IRWXU) == -1) {
+        if (open(this->filename.c_str(), O_APPEND | O_RDWR | O_CREAT,
+                 S_IRWXU) == -1) {
             perror("bassa lecha");//todo: change to correct error method.
         }
     } else {
-        if (open(this->filename.c_str(), O_TRUNC | O_RDWR | O_CREAT, S_IRWXU) == -1) {
+        if (open(this->filename.c_str(), O_TRUNC | O_RDWR | O_CREAT, S_IRWXU) ==
+            -1) {
             perror("bassa lecha 2");//todo: change to correct error method
         }
     }
 
     this->c->execute();
-
     this->cleanup();
 }
 
-cpCommand::cpCommand(const char *cmd_line, bool isBackground) : BuiltInCommand(cmd_line), isBackground(isBackground) {
+cpCommand::cpCommand(const char *cmd_line, bool isBackground) : BuiltInCommand(
+        cmd_line), isBackground(isBackground) {
     char *args[21];
     _parseCommandLine(cmd_line, args);
     this->exe = false;
     if (args[3]) {
         std::cout << "smash error: cd: too many arguments" << std::endl;
     } else if (strcmp(args[1], "-") == 0 && shell->last_dir.empty()) {
-        std::cout << "smash error: cd: OLDPWD not set" << std::endl;//todo: maybe to perror.
+        std::cout << "smash error: cd: OLDPWD not set"
+                  << std::endl;//todo: maybe to perror.
     } else {
         this->src = string(args[1]);
         this->dst = string(args[2]);
@@ -779,7 +805,8 @@ cpCommand::cpCommand(const char *cmd_line, bool isBackground) : BuiltInCommand(c
 }
 
 void cpCommand::copySuccess() {
-    std::cout << "smash: " << this->src << " was copied to " << this->dst << endl;
+    std::cout << "smash: " << this->src << " was copied to " << this->dst
+              << endl;
 }
 
 void errorCopy(const char *err) {
@@ -817,7 +844,8 @@ void cpCommand::execute() {//Son
         if (src_fd == -1) {
             errorCopy("smash: open failed");
         }
-        dst_fd = open(this->dst.c_str(), O_CREAT | O_TRUNC | O_RDWR, S_IRWXU | S_IRWXG | S_IRWXO);
+        dst_fd = open(this->dst.c_str(), O_CREAT | O_TRUNC | O_RDWR,
+                      S_IRWXU | S_IRWXG | S_IRWXO);
         if (dst_fd == -1) {
             close(src_fd);
             errorCopy("smash: open failed");

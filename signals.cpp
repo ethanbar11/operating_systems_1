@@ -2,6 +2,7 @@
 #include <signal.h>
 #include "signals.h"
 #include "Commands.h"
+#include <unistd.h>
 
 using namespace std;
 
@@ -44,12 +45,14 @@ void ctrlCHandler(int sig_num) {
 void alarmHandler(int sig_num) {
     auto shell = &SmallShell::getInstance();
     auto currentJob = shell->jobsList.currentJob;
+    cout << "smash: got an alarm" << '\n';
+//    perror(" ");
     if (currentJob != nullptr) {
         double diff_time = difftime(time(nullptr), currentJob->start_time);
         if (currentJob->command->timeoutcommand &&
             diff_time >= currentJob->command->maxTime) {
             cout << "smash: " << currentJob->command->original_cmd_line
-                 << " timed out\n";
+                 << " timed out!\n";
             kill(currentJob->pid, SIGKILL);
             delete currentJob;
             shell->jobsList.currentJob = nullptr;
@@ -65,6 +68,18 @@ void alarmHandler(int sig_num) {
             kill(currentJob->pid, SIGKILL);
         }
     }
-
+    shell->timeouts.erase(shell->timeouts.begin());
+    if (!shell->timeouts.empty()) {
+        auto timeout_minimal = *shell->timeouts.begin() - time(nullptr);
+        while (timeout_minimal <= 0 && !shell->timeouts.empty()) {
+            shell->timeouts.erase(shell->timeouts.begin());
+//            cout << "Erased!\n";
+            timeout_minimal = *shell->timeouts.begin() - time(nullptr);
+        }
+        if (shell->timeouts.empty())
+            return;
+//        cout << "Minimal Time: " << timeout_minimal << '\n';
+        alarm(timeout_minimal);
+    }
 }
 
