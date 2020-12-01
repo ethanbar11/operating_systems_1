@@ -331,6 +331,7 @@ PipeCommand::PipeCommand(const char *cmd_line) : Command(cmd_line) {
 }
 
 void PipeCommand::execute() {
+    int outputFile = (this->regularPipe) ? 1 : 2;//1 = stdout : 2 = stderr.
     if (!first_command || !second_command) {
         //todo: handle error.
         return;
@@ -351,8 +352,8 @@ void PipeCommand::execute() {
         exit(0);
 
     } else { //Father
-        x = dup(1);
-        dup2(fd[1], 1);
+        x = dup(outputFile);
+        dup2(fd[1], outputFile);//todo: check
         close(fd[0]);
         close(fd[1]);
         if (this->is_built_in) {
@@ -375,7 +376,7 @@ void PipeCommand::execute() {
                 }
             }
         }
-        close(1);
+        close(outputFile);
         dup(x);
         if (second_command->status == Foreground) {
             this->shell->jobsList.setCurrentJob(this, pid, -1, false);
