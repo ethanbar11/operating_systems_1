@@ -164,7 +164,7 @@ void SmallShell::executeCommand(const char *cmd_line) {
     this->jobsList.checkForFinishedJobs();
     Command *cmd = CreateCommand(cmd_line);
     cmd->execute();
-//    cout << "Counter : " << this->jobsList.counter << "\n";
+    cout << "";
 }
 
 SmallShell::~SmallShell() {
@@ -207,7 +207,7 @@ Command::Command(const char *cmd_line) {
 Command::~Command() {}
 
 void ShowPidCommand::execute() {
-//    std::cout << "smash pid is " << ::getpid() << "\n";
+    std::cout << "smash pid is " << ::getpid() << std::endl;
 
 }
 
@@ -302,14 +302,16 @@ JobEntry *JobsList::getLastJob(int *lastJobId) {
 }
 
 JobEntry *JobsList::getLastStoppedJob(int *jobId) {
+    int max_jobID = -1;
+    JobEntry *max_job = nullptr;
     for (auto job  : jobs) {
-        if (job->ID == this->counter && job->status == Stopped) {
-            *jobId = job->ID;
-            return job;
+        if (job->ID > max_jobID && job->status == Stopped) {
+            max_jobID = job->ID;
+            max_job = job;
         }
     }
-    *jobId = -1;
-    return nullptr;
+    *jobId = max_jobID;
+    return max_job;
 }
 
 PipeCommand::PipeCommand(const char *cmd_line) : Command(cmd_line) {
@@ -323,7 +325,7 @@ PipeCommand::PipeCommand(const char *cmd_line) : Command(cmd_line) {
     second_command = dynamic_cast<ExternalCommand *>(this->shell->CreateCommand(
             cmd_s.substr(pipe_position + 1,
                          second_part_length).c_str()));
-    this->regularPipe = cmd_line[pipe_position + 1] == '&';
+    this->regularPipe = cmd_line[pipe_position + 1] != '&';
     this->is_built_in =
             dynamic_cast<BuiltInCommand *>(first_command) != nullptr;
     //todo: if c2 is built in command - c2 = null...
@@ -340,9 +342,11 @@ void PipeCommand::execute() {
     int fd[2];
     pipe(fd);
     int pid = fork();
+
     int x;
 
     if (pid == 0) { //Son
+        setpgrp();
         dup2(fd[0], 0);
         close(fd[0]);
         close(fd[1]);
@@ -353,6 +357,7 @@ void PipeCommand::execute() {
 
     } else { //Father
         x = dup(outputFile);
+        setpgrp();
         dup2(fd[1], outputFile);//todo: check
         close(fd[0]);
         close(fd[1]);
@@ -361,9 +366,11 @@ void PipeCommand::execute() {
         } else {
             int pid2 = fork();
             if (pid2 == 0) { // Second son
+                setpgrp();
                 this->first_command->execute();
                 exit(0);
             } else { //Still father
+
                 if (second_command->status == Foreground) {
                     this->shell->jobsList.setCurrentJob(this, pid, -1, false,
                                                         pid2);
@@ -384,6 +391,9 @@ void PipeCommand::execute() {
             delete this->shell->jobsList.currentJob;
             this->shell->jobsList.currentJob = nullptr;
         }
+
+//        usleep(2000);
+//        kill(getpid(),SIGINT);
     }
 }
 
@@ -447,7 +457,7 @@ int Command::GetMaxStoppedJobID(char *const *args) const {
             return -1;
 
     } else {
-        shell->jobsList.getLastJob(&jobIdLocal);
+        shell->jobsList.getLastStoppedJob(&jobIdLocal);
     }
     return jobIdLocal;
 }
@@ -460,17 +470,17 @@ ForegroundCommand::ForegroundCommand(const char *cmd_line)
     }
     _parseCommandLine(this->cmd_line, args);
     if (args[2] != nullptr) {//Error in number of arguments
-        cout << "smash error: fg: invalid arguments" << "\n";
+        cout << "smash error: fg: invalid arguments" << std::endl;
         this->should_operate = false;
         return;
     }
     jobID = getMaxJobID(args);
     if (jobID == -1) { // Error in job id
         if (shell->jobsList.jobs.empty())
-            cout << "smash error: fg: jobs list is empty" << "\n";
+            cout << "smash error: fg: jobs list is empty" << std::endl;
         else
             cout << "smash error: fg: job-id " << args[1] << " does not exist"
-                 << "\n";
+                 << std::endl;
         this->should_operate = false;
         return;
     }
@@ -483,7 +493,7 @@ void ForegroundCommand::execute() {
     if (!should_operate)
         return;
     auto job = shell->jobsList.getJobById(jobID);
-    cout << job->command->original_cmd_line << " : " << job->pid << "\n";
+    cout << job->command->original_cmd_line << " : " << job->pid << std::endl;
     kill(job->pid, SIGCONT);
     if (job->pid2 != -1)
         kill(job->pid2, SIGCONT);
@@ -514,7 +524,7 @@ BackgroundCommand::BackgroundCommand(const char *cmd_line)
     }
     _parseCommandLine(this->cmd_line, args);
     if (args[2] != nullptr) {//Error in number of arguments
-        cout << "smash error: bg: invalid arguments" << "\n";
+        cout << "smash error: bg: invalid arguments" << std::endl;
         this->should_operate = false;
         return;
     }
@@ -525,12 +535,13 @@ BackgroundCommand::BackgroundCommand(const char *cmd_line)
             if (job == nullptr)
                 cout << "smash error: bg: job-id " << args[1]
                      << " does not exist"
-                     << "\n";
+                     << std::endl;
             else //TODO: might be a problem here if no job was told to be bg'd.
                 cout << "smash error: bg: job-id " << args[1]
-                     << " is already running in the background" << "\n";
+                     << " is already running in the background" << std::endl;
         } else {
-            cout << "smash error: bg: there is no stopped jobs to resume\n";
+            cout << "smash error: bg: there is no stopped jobs to resume"
+                 << std::endl;
         }
 
         this->should_operate = false;
@@ -544,7 +555,7 @@ void BackgroundCommand::execute() {
     if (!should_operate)
         return;
     auto job = shell->jobsList.getJobById(jobID);
-    cout << job->command->original_cmd_line << " : " << job->pid << "\n";
+    cout << job->command->original_cmd_line << " : " << job->pid << std::endl;
     kill(job->pid, SIGCONT);
     if (job->pid2 != -1)
         kill(job->pid2, SIGCONT);
@@ -561,7 +572,7 @@ KillCommand::KillCommand(const char *cmd_line) : BuiltInCommand(cmd_line) {
     if (args[1] == nullptr || args[1][0] != '-' ||
         args[2] == nullptr ||
         args[3] != nullptr) {//Error in number of arguments
-        cout << "smash error: kill: invalid arguments" << "\n";
+        cout << "smash error: kill: invalid arguments" << std::endl;
         this->should_operate = false;
         return;
     }
@@ -571,20 +582,20 @@ KillCommand::KillCommand(const char *cmd_line) : BuiltInCommand(cmd_line) {
                                                              signum_as_str.size() -
                                                              1).c_str();
     if (!is_number(part_of_signum_as_str)) {
-        cout << "smash error: kill: invalid arguments" << "\n";
+        cout << "smash error: kill: invalid arguments" << std::endl;
         this->should_operate = false;
         return;
     }
     signum = atoi(part_of_signum_as_str);
     if (signum > 32) {
-        cout << "smash error: kill: invalid arguments" << "\n";
+        cout << "smash error: kill: invalid arguments" << std::endl;
         this->should_operate = false;
         return;
     }
     auto job = shell->jobsList.getJobById(atoi(args[2]));
     if (job == nullptr) {
         cout << "smash error: kill: job-id " << args[2] << " does not exist"
-             << "\n";
+             << std::endl;
         this->should_operate = false;
         return;
     }
@@ -597,7 +608,7 @@ void KillCommand::execute() {
     if (should_operate) {
         kill(this->jobPID, signum);
         cout << "signal number " << signum << " was sent to pid " << jobPID
-             << "\n";
+             << std::endl;
     }
 }
 
@@ -617,7 +628,7 @@ void JobsCommand::execute() {
              << job->pid
              << " " << difftime(time(nullptr), job->start_time) << " secs"
              << status_string
-             << "\n";
+             << std::endl;
     }
 
 }
@@ -692,7 +703,7 @@ TimeoutCommand::TimeoutCommand(const char *cmd_line) : Command(cmd_line) {
     char *args[21];
     _parseCommandLine(cmd_line, args);
     if (args[1] == nullptr || args[2] == nullptr) {
-        cout << "smash error: timeout: invalid arguments\n";
+        cout << "smash error: timeout: invalid arguments" << std::endl;
         this->should_operate = false;
         return;
     }
@@ -717,7 +728,7 @@ void TimeoutCommand::execute() {
         auto timeouts = this->shell->timeouts;
         sort(timeouts.begin(), timeouts.end());
         auto timeout_minimal = *timeouts.begin() - time(nullptr);
-//        cout << "Minimal new time: " << timeout_minimal << "\n";
+//        cout << "Minimal new time: " << timeout_minimal << std::endl;
         alarm(timeout_minimal);
         this->inner_cmd->execute();
     }
@@ -732,14 +743,15 @@ QuitCommand::QuitCommand(const char *cmd_line)
     if (args[1] != NULL && strcmp(args[1], "kill") == 0) {
         cout << "smash: sending SIGKILL signal to "
              << this->shell->jobsList.jobs.size()
-             << " jobs:\n";
+             << " jobs:" << std::endl;
 
         for (auto &job : shell->jobsList.jobs) {
             kill(job->pid, SIGKILL);
             if (job->pid2 != -1)
                 kill(job->pid2, SIGKILL);
 
-            cout << job->pid << ": " << job->command->original_cmd_line << '\n';
+            cout << job->pid << ": " << job->command->original_cmd_line
+                 << std::endl;
         }
     }
 }
@@ -794,14 +806,12 @@ cpCommand::cpCommand(const char *cmd_line, bool isBackground) : BuiltInCommand(
     _parseCommandLine(cmd_line, args);
     this->exe = false;
     if (args[3]) {
-        std::cout << "smash error: cd: too many arguments" << std::endl;
-    } else if (strcmp(args[1], "-") == 0 && shell->last_dir.empty()) {
-        std::cout << "smash error: cd: OLDPWD not set"
-                  << std::endl;//todo: maybe to perror.
+        perror("smash error: cd: too many arguments");
     } else {
         this->src = string(args[1]);
         this->dst = string(args[2]);
         this->exe = true;
+
     }
 }
 
@@ -815,63 +825,46 @@ void errorCopy(const char *err) {
     exit(1);
 }
 
-bool cpCommand::srcExists() {
-    struct stat st;
-    if (stat(this->src.c_str(), &st) == 0)
-        return true;
-    return false;
-//    DIR *dir = opendir(this->src.c_str());
-//    if (!dir) {
-//        perror("smash: file not found");
-//        return false;
-//    }
-//    closedir(dir);
-//    return true;
-}
-
 void cpCommand::execute() {//Son
-    if (!this->srcExists())
-        return;
     int pid = fork();
     int x;
-
     if (pid < 0) {
-        perror("smash: error: fork failed");//todo: handle error.
+        perror("smash error: fork failed");//todo: handle error.
         return;
     } else if (pid == 0) {
+        setpgrp();
         char fileBuff[MAX_BUFF];
         int src_fd, dst_fd, curr_fd = 1;
         src_fd = open(this->src.c_str(), O_RDONLY);
         if (src_fd == -1) {
-            errorCopy("smash: open failed");
+            errorCopy("smash error: open failed src");
         }
         dst_fd = open(this->dst.c_str(), O_CREAT | O_TRUNC | O_RDWR,
                       S_IRWXU | S_IRWXG | S_IRWXO);
         if (dst_fd == -1) {
             close(src_fd);
-            errorCopy("smash: open failed");
+            errorCopy("smash error: open failed dst");
         }
-
         while (curr_fd) {
             curr_fd = read(src_fd, &fileBuff, MAX_BUFF);
             if (curr_fd == -1) {
                 close(src_fd);
                 close(dst_fd);
-                errorCopy("smash: read failed");
+                errorCopy("smash error: read failed");
             }
             int res = write(dst_fd, &fileBuff, curr_fd);
             if (res == -1) {
                 close(dst_fd);
                 close(src_fd);
-                errorCopy("smash: write failed");
+                errorCopy("smash error: write failed");
             }
         }
         if (close(dst_fd) == -1) {
             close(src_fd);
-            errorCopy("smash: close failed");
+            errorCopy("smash error: close failed");
         }
         if (close(src_fd) == -1)
-            errorCopy("smash: close failed");
+            errorCopy("smash error: close failed");
         this->copySuccess();
         exit(0);
     } else {//Father
