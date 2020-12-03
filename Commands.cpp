@@ -197,10 +197,8 @@ BuiltInCommand::BuiltInCommand(const char *cmd_line) : Command::Command(
 }
 
 Command::Command(const char *cmd_line) {
-//    this->original_cmd_line = string(cmd_line).c_str();
     this->original_cmd_line = new char[strlen(cmd_line) + 1];
     strcpy(original_cmd_line, cmd_line);
-    // TODO: Need to clean memory of the string
     this->shell = &SmallShell::getInstance();
 }
 
@@ -266,9 +264,10 @@ void JobsList::setCurrentCounter() {
 
 void JobsList::removeJobById(int jobId) {
     JobEntry *job = getJobById(jobId);
-    if (job == nullptr)
-        // TODO: add handling for error here?
-        ;
+    if (job == nullptr) {
+        perror("smash error: job doesn't exists");
+        return;
+    }
     jobs.erase(std::remove(jobs.begin(), jobs.end(), job), jobs.end());
     setCurrentCounter();
 
@@ -328,14 +327,14 @@ PipeCommand::PipeCommand(const char *cmd_line) : Command(cmd_line) {
     this->regularPipe = cmd_line[pipe_position + 1] != '&';
     this->is_built_in =
             dynamic_cast<BuiltInCommand *>(first_command) != nullptr;
-    //todo: if c2 is built in command - c2 = null...
-    //todo: if & in cmd_line change this->isBackground to true
+    if(dynamic_cast<BuiltInCommand *>(this->second_command) != nullptr)
+        this->second_command = nullptr;
 }
 
 void PipeCommand::execute() {
     int outputFile = (this->regularPipe) ? 1 : 2;//1 = stdout : 2 = stderr.
     if (!first_command || !second_command) {
-        //todo: handle error.
+        perror("smash error: problem with pipe command");
         return;
     }
 
@@ -345,7 +344,11 @@ void PipeCommand::execute() {
 
     int x;
 
-    if (pid == 0) { //Son
+
+    if (pid < 0) {
+        perror("smash error: fork failed");
+        return;
+    } else if (pid == 0) { //Son
         setpgrp();
         dup2(fd[0], 0);
         close(fd[0]);
@@ -358,7 +361,9 @@ void PipeCommand::execute() {
     } else { //Father
         x = dup(outputFile);
         setpgrp();
-        dup2(fd[1], outputFile);//todo: check
+        if(dup2(fd[1], outputFile) == -1){
+            perror("smash error: dup2 failed");
+        }
         close(fd[0]);
         close(fd[1]);
         if (this->is_built_in) {
@@ -398,7 +403,6 @@ void PipeCommand::execute() {
 }
 
 ExternalCommand::ExternalCommand(const char *cmd_line) : Command(cmd_line) {
-//     TODO: To check here for background.
     string line = _trim(this->original_cmd_line);
     this->timeoutcommand = false;
     if (line.back() == '&')
@@ -414,8 +418,7 @@ ExternalCommand::ExternalCommand(const char *cmd_line) : Command(cmd_line) {
 void ExternalCommand::execute() {
     pid_t pid = fork();
     if (pid == -1) {
-        //TODO: Change problem handling
-        cout << "Problem Forking, why?!!!";
+        perror("smash error: fork failed");
     } else if (pid == 0) { // Son
         setpgrp();
         ::execl("/bin/bash", "/bin/bash", "-c",
@@ -658,7 +661,7 @@ void lsCommand::execute() {
 void pwdCommand::execute() {
     char cwd[PATH_MAX];
     if (getcwd(cwd, sizeof(cwd)) == NULL) {
-        //todo: Handle error(?)
+        perror("smash error: getcwd failed");
         return;
     }
     std::cout << cwd << std::endl;
@@ -684,7 +687,7 @@ void cdCommand::execute() {
         return;
     char cwd[PATH_MAX];
     if (getcwd(cwd, sizeof(cwd)) == NULL) {
-        //todo: Handle error(?)
+        perror("smash error: getcwd failed");
         return;
     }
 
@@ -773,12 +776,17 @@ RedirectionCommand::RedirectionCommand(const char *cmd_line) : Command(
 
 void RedirectionCommand::prepare() {
     this->fd = dup(1);
-    close(1);
+    if(this->fd < 0)
+        perror("smash error: dup failed");
+    if(close(1) < 0)
+        perror("smash error: close failed");
 }
 
 void RedirectionCommand::cleanup() {
-    close(1);
-    dup(this->fd);
+    if(close(1) < 0)
+        perror("smash error: close failed");
+    if(dup(this->fd) < 0)
+        perror("smash error: dup failed");
 }
 
 void RedirectionCommand::execute() {
@@ -787,12 +795,12 @@ void RedirectionCommand::execute() {
     if (this->doubleBiggerThan) {
         if (open(this->filename.c_str(), O_APPEND | O_RDWR | O_CREAT,
                  S_IRWXU) == -1) {
-            perror("bassa lecha");//todo: change to correct error method.
+            perror("smash error: open failed");
         }
     } else {
         if (open(this->filename.c_str(), O_TRUNC | O_RDWR | O_CREAT, S_IRWXU) ==
             -1) {
-            perror("bassa lecha 2");//todo: change to correct error method
+            perror("smash error: open failed");
         }
     }
 
@@ -821,7 +829,7 @@ void cpCommand::copySuccess() {
 }
 
 void errorCopy(const char *err) {
-    perror(err);//todo: handle error.
+    perror(err);
     exit(1);
 }
 
@@ -829,7 +837,7 @@ void cpCommand::execute() {//Son
     int pid = fork();
     int x;
     if (pid < 0) {
-        perror("smash error: fork failed");//todo: handle error.
+        perror("smash error: fork failed");
         return;
     } else if (pid == 0) {
         setpgrp();
